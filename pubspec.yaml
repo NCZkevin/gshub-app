@@ -1,0 +1,64 @@
+name: sysapp
+description: "Robot controller multi-platform app."
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.11.4
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+
+  # State management
+  flutter_riverpod: ^2.5.1
+  riverpod_annotation: ^2.3.5
+
+  # Routing
+  go_router: ^14.2.7
+
+  # HTTP & WebSocket
+  dio: ^5.7.0
+  web_socket_channel: ^3.0.1
+
+  # WebRTC video
+  flutter_webrtc: ^0.11.7
+
+  # Storage
+  shared_preferences: ^2.3.2
+  flutter_secure_storage: ^9.2.2
+
+  # Data models
+  freezed_annotation: ^2.4.4
+  json_annotation: ^4.9.0
+
+  # i18n
+  intl: ^0.20.2
+
+  # Firebase
+  firebase_core: ^3.8.0
+  firebase_crashlytics: ^4.1.4
+
+  cupertino_icons: ^1.0.8
+  uuid: ^4.5.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+  # Code generation
+  build_runner: ^2.4.13
+  riverpod_generator: ^2.4.3
+  freezed: ^2.5.7
+  json_serializable: ^6.8.0
+
+  # Testing
+  mocktail: ^1.0.4
+
+flutter:
+  uses-material-design: true
+  generate: true
