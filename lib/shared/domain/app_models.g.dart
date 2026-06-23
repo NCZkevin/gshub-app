@@ -119,7 +119,7 @@ Map<String, dynamic> _$$FileInfoImplToJson(_$FileInfoImpl instance) =>
 _$MappingStatusImpl _$$MappingStatusImplFromJson(Map<String, dynamic> json) =>
     _$MappingStatusImpl(
       status: json['status'] as String? ?? 'unknown',
-      perceptionAvailable: json['perception_available'] as bool? ?? false,
+      perceptionAvailable: json['perceptions_available'] as bool? ?? false,
       mapAvailable: json['map_available'] as bool? ?? false,
       pointsCollected: (json['points_collected'] as num?)?.toInt() ?? 0,
       sceneName: json['scene_name'] as String?,
@@ -129,7 +129,7 @@ _$MappingStatusImpl _$$MappingStatusImplFromJson(Map<String, dynamic> json) =>
 Map<String, dynamic> _$$MappingStatusImplToJson(_$MappingStatusImpl instance) =>
     <String, dynamic>{
       'status': instance.status,
-      'perception_available': instance.perceptionAvailable,
+      'perceptions_available': instance.perceptionAvailable,
       'map_available': instance.mapAvailable,
       'points_collected': instance.pointsCollected,
       'scene_name': instance.sceneName,

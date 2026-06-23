@@ -1,3 +1,7 @@
+import 'dart:typed_data';
+
+import 'package:dio/dio.dart';
+
 import '../../../core/api/dio_client.dart';
 import '../../../shared/domain/app_models.dart';
 
@@ -46,6 +50,41 @@ class MappingRepository {
     return list
         .map((e) => MapInfo.fromJson(e as Map<String, dynamic>))
         .toList();
+  }
+
+  /// GET /maps/{name}/files → {map_name, total, files: [...]}
+  Future<List<FileInfo>> fetchMapFiles(String name) async {
+    final data = await _client.get('/maps/$name/files');
+    if (data == null) return [];
+    final map = data as Map<String, dynamic>;
+    final list = map['files'] as List<dynamic>? ?? [];
+    return list
+        .map((e) => FileInfo.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  /// GET /maps/{name}/files/{filePath}
+  Future<Uint8List> fetchMapFile(String name, String filePath) async {
+    final bytes = await _client.getBytes('/maps/$name/files/$filePath');
+    return Uint8List.fromList(bytes);
+  }
+
+  /// GET /maps/{name}/archive
+  Future<Uint8List> fetchArchive(String name) async {
+    final bytes = await _client.getBytes('/maps/$name/archive');
+    return Uint8List.fromList(bytes);
+  }
+
+  /// PUT /maps/{name} — 上传编辑后的 PGM
+  Future<void> updateMapPgm(String name, Uint8List bytes) async {
+    final form = FormData.fromMap({
+      'file': MultipartFile.fromBytes(bytes, filename: '$name.pgm'),
+    });
+    await _client.put(
+      '/maps/$name',
+      data: form,
+      options: Options(contentType: Headers.multipartFormDataContentType),
+    );
   }
 
   /// DELETE /maps/{name}

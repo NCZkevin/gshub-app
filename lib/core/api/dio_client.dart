@@ -46,8 +46,12 @@ class DioClient {
     return response.data;
   }
 
-  Future<dynamic> put(String path, {dynamic data}) async {
-    final response = await _dio.put<dynamic>(path, data: data);
+  Future<dynamic> put(String path, {dynamic data, Options? options}) async {
+    final response = await _dio.put<dynamic>(
+      path,
+      data: data,
+      options: options,
+    );
     return response.data;
   }
 
@@ -74,7 +78,10 @@ class _AuthInterceptor extends Interceptor {
 
 class _EnvelopeInterceptor extends Interceptor {
   @override
-  void onResponse(Response<dynamic> response, ResponseInterceptorHandler handler) {
+  void onResponse(
+    Response<dynamic> response,
+    ResponseInterceptorHandler handler,
+  ) {
     var data = response.data;
 
     // If Dio didn't auto-parse JSON (missing/wrong Content-Type), do it manually

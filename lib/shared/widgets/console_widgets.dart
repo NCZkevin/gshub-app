@@ -102,7 +102,10 @@ class ConsoleCard extends StatelessWidget {
           ),
           child: LayoutBuilder(
             builder: (context, constraints) {
-              final content = Padding(padding: padding, child: child);
+              final content = Material(
+                type: MaterialType.transparency,
+                child: Padding(padding: padding, child: child),
+              );
               final hasBoundedHeight = constraints.hasBoundedHeight;
 
               return Column(

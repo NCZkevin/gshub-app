@@ -82,14 +82,7 @@ class ContainerInfo with _$ContainerInfo {
 
 // ─── 导航 ────────────────────────────────────────────────────
 
-enum NavigationStatus {
-  vacant,
-  navigating,
-  arrived,
-  failed,
-  paused,
-  stopped
-}
+enum NavigationStatus { vacant, navigating, arrived, failed, paused, stopped }
 
 // GET /nav/navigation_status → {status: "navigating", relocalization: "active"}
 class NavStatus {
@@ -183,7 +176,8 @@ class FileInfo with _$FileInfo {
 class MappingStatus with _$MappingStatus {
   const factory MappingStatus({
     @Default('unknown') String status,
-    @JsonKey(name: 'perception_available') @Default(false)
+    @JsonKey(name: 'perceptions_available')
+    @Default(false)
     bool perceptionAvailable,
     @JsonKey(name: 'map_available') @Default(false) bool mapAvailable,
     @JsonKey(name: 'points_collected') @Default(0) int pointsCollected,

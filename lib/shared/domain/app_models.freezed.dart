@@ -1741,7 +1741,7 @@ MappingStatus _$MappingStatusFromJson(Map<String, dynamic> json) {
 /// @nodoc
 mixin _$MappingStatus {
   String get status => throw _privateConstructorUsedError;
-  @JsonKey(name: 'perception_available')
+  @JsonKey(name: 'perceptions_available')
   bool get perceptionAvailable => throw _privateConstructorUsedError;
   @JsonKey(name: 'map_available')
   bool get mapAvailable => throw _privateConstructorUsedError;
@@ -1771,7 +1771,7 @@ abstract class $MappingStatusCopyWith<$Res> {
   @useResult
   $Res call({
     String status,
-    @JsonKey(name: 'perception_available') bool perceptionAvailable,
+    @JsonKey(name: 'perceptions_available') bool perceptionAvailable,
     @JsonKey(name: 'map_available') bool mapAvailable,
     @JsonKey(name: 'points_collected') int pointsCollected,
     @JsonKey(name: 'scene_name') String? sceneName,
@@ -1844,7 +1844,7 @@ abstract class _$$MappingStatusImplCopyWith<$Res>
   @useResult
   $Res call({
     String status,
-    @JsonKey(name: 'perception_available') bool perceptionAvailable,
+    @JsonKey(name: 'perceptions_available') bool perceptionAvailable,
     @JsonKey(name: 'map_available') bool mapAvailable,
     @JsonKey(name: 'points_collected') int pointsCollected,
     @JsonKey(name: 'scene_name') String? sceneName,
@@ -1909,7 +1909,7 @@ class __$$MappingStatusImplCopyWithImpl<$Res>
 class _$MappingStatusImpl implements _MappingStatus {
   const _$MappingStatusImpl({
     this.status = 'unknown',
-    @JsonKey(name: 'perception_available') this.perceptionAvailable = false,
+    @JsonKey(name: 'perceptions_available') this.perceptionAvailable = false,
     @JsonKey(name: 'map_available') this.mapAvailable = false,
     @JsonKey(name: 'points_collected') this.pointsCollected = 0,
     @JsonKey(name: 'scene_name') this.sceneName,
@@ -1923,7 +1923,7 @@ class _$MappingStatusImpl implements _MappingStatus {
   @JsonKey()
   final String status;
   @override
-  @JsonKey(name: 'perception_available')
+  @JsonKey(name: 'perceptions_available')
   final bool perceptionAvailable;
   @override
   @JsonKey(name: 'map_available')
@@ -1990,7 +1990,7 @@ class _$MappingStatusImpl implements _MappingStatus {
 abstract class _MappingStatus implements MappingStatus {
   const factory _MappingStatus({
     final String status,
-    @JsonKey(name: 'perception_available') final bool perceptionAvailable,
+    @JsonKey(name: 'perceptions_available') final bool perceptionAvailable,
     @JsonKey(name: 'map_available') final bool mapAvailable,
     @JsonKey(name: 'points_collected') final int pointsCollected,
     @JsonKey(name: 'scene_name') final String? sceneName,
@@ -2003,7 +2003,7 @@ abstract class _MappingStatus implements MappingStatus {
   @override
   String get status;
   @override
-  @JsonKey(name: 'perception_available')
+  @JsonKey(name: 'perceptions_available')
   bool get perceptionAvailable;
   @override
   @JsonKey(name: 'map_available')
