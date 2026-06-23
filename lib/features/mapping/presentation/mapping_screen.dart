@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../../app/theme.dart';
+import '../../../shared/widgets/console_widgets.dart';
 import 'mapping_provider.dart';
 import '../../../shared/domain/app_models.dart';
 
@@ -23,9 +25,12 @@ class _MappingScreenState extends ConsumerState<MappingScreen> {
   Widget build(BuildContext context) {
     final asyncState = ref.watch(mappingProvider);
 
-    return Scaffold(
+    return ConsoleScaffold(
       appBar: AppBar(
-        title: const Text('建图管理'),
+        title: const ConsoleAppBarTitle(
+          title: '建图管理',
+          subtitle: 'mapping workspace',
+        ),
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
@@ -39,7 +44,7 @@ class _MappingScreenState extends ConsumerState<MappingScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.error_outline, size: 48, color: Colors.red),
+              const Icon(Icons.error_outline, size: 48, color: AppTheme.danger),
               const SizedBox(height: 12),
               Text('加载失败: $e'),
               const SizedBox(height: 12),
@@ -65,77 +70,68 @@ class _MappingScreenState extends ConsumerState<MappingScreen> {
       padding: const EdgeInsets.all(16),
       children: [
         // Start mapping section
-        Card(
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
+        ConsoleCard(
+          title: '开始建图',
+          icon: Icons.add_location_alt_outlined,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              TextField(
+                controller: _nameController,
+                decoration: const InputDecoration(
+                  labelText: '地图名称',
+                  hintText: '请输入地图名称',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 12),
+              if (state.error != null) ...[
                 Text(
-                  '开始建图',
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.bold,
-                      ),
+                  state.error!,
+                  style: const TextStyle(color: AppTheme.danger, fontSize: 13),
                 ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: _nameController,
-                  decoration: const InputDecoration(
-                    labelText: '地图名称',
-                    hintText: '请输入地图名称',
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                if (state.error != null) ...[
-                  Text(
-                    state.error!,
-                    style: const TextStyle(color: Colors.red, fontSize: 13),
-                  ),
-                  const SizedBox(height: 8),
-                ],
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton.icon(
-                    icon: state.loading
-                        ? const SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.map),
-                    label: const Text('开始建图'),
-                    onPressed: state.loading
-                        ? null
-                        : () {
-                            ref
-                                .read(mappingProvider.notifier)
-                                .startMapping(_nameController.text);
-                          },
-                  ),
-                ),
+                const SizedBox(height: 8),
               ],
-            ),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  icon: state.loading
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.map),
+                  label: const Text('开始建图'),
+                  onPressed: state.loading
+                      ? null
+                      : () {
+                          ref
+                              .read(mappingProvider.notifier)
+                              .startMapping(_nameController.text);
+                        },
+                ),
+              ),
+            ],
           ),
         ),
         const SizedBox(height: 16),
-        Text(
-          '已保存的地图 (${state.maps.length})',
-          style: Theme.of(context).textTheme.titleMedium,
+        ConsoleCard(
+          title: '已保存的地图 (${state.maps.length})',
+          icon: Icons.map_outlined,
+          child: state.maps.isEmpty
+              ? const EmptyState(icon: Icons.map_outlined, label: '暂无保存的地图')
+              : Column(
+                  children: state.maps
+                      .map(
+                        (map) => _MapCard(
+                          map: map,
+                          onDelete: () => _confirmDelete(context, map.name),
+                        ),
+                      )
+                      .toList(),
+                ),
         ),
-        const SizedBox(height: 8),
-        if (state.maps.isEmpty)
-          const Center(
-            child: Padding(
-              padding: EdgeInsets.all(32),
-              child: Text('暂无保存的地图', style: TextStyle(color: Colors.grey)),
-            ),
-          )
-        else
-          ...state.maps.map((map) => _MapCard(
-                map: map,
-                onDelete: () => _confirmDelete(context, map.name),
-              )),
       ],
     );
   }
@@ -147,74 +143,73 @@ class _MappingScreenState extends ConsumerState<MappingScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      const Icon(Icons.circle, color: Colors.green, size: 12),
-                      const SizedBox(width: 8),
-                      Text(
-                        '建图进行中',
-                        style: Theme.of(context)
-                            .textTheme
-                            .titleMedium
-                            ?.copyWith(fontWeight: FontWeight.bold),
-                      ),
-                    ],
-                  ),
-                  if (status?.sceneName != null) ...[
-                    const SizedBox(height: 4),
+          ConsoleCard(
+            title: '建图状态',
+            icon: Icons.radar_outlined,
+            trailing: const StatusPill(
+              label: 'RUNNING',
+              color: AppTheme.success,
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Icon(Icons.circle, color: AppTheme.success, size: 12),
+                    const SizedBox(width: 8),
                     Text(
-                      '地图: ${status!.sceneName}',
-                      style: const TextStyle(color: Colors.grey),
+                      '建图进行中',
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ],
-                  const Divider(height: 24),
-                  _StatusRow(
-                    label: '状态',
-                    value: status?.status ?? '获取中...',
-                  ),
-                  const SizedBox(height: 8),
-                  _StatusRow(
-                    label: '传感器健康',
-                    value: status == null
-                        ? '...'
-                        : status.perceptionAvailable
-                            ? '正常'
-                            : '异常',
-                    valueColor: status == null
-                        ? null
-                        : status.perceptionAvailable
-                            ? Colors.green
-                            : Colors.red,
-                  ),
-                  const SizedBox(height: 8),
-                  _StatusRow(
-                    label: '地图可用',
-                    value: status == null
-                        ? '...'
-                        : status.mapAvailable
-                            ? '是'
-                            : '否',
-                    valueColor: status == null
-                        ? null
-                        : status.mapAvailable
-                            ? Colors.green
-                            : Colors.orange,
-                  ),
-                  const SizedBox(height: 8),
-                  _StatusRow(
-                    label: '已采集点数',
-                    value: status == null
-                        ? '...'
-                        : status.pointsCollected.toString(),
+                ),
+                if (status?.sceneName != null) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    '地图: ${status!.sceneName}',
+                    style: TextStyle(color: AppTheme.mutedText(context)),
                   ),
                 ],
-              ),
+                const Divider(height: 24),
+                _StatusRow(label: '状态', value: status?.status ?? '获取中...'),
+                const SizedBox(height: 8),
+                _StatusRow(
+                  label: '传感器健康',
+                  value: status == null
+                      ? '...'
+                      : status.perceptionAvailable
+                      ? '正常'
+                      : '异常',
+                  valueColor: status == null
+                      ? null
+                      : status.perceptionAvailable
+                      ? AppTheme.success
+                      : AppTheme.danger,
+                ),
+                const SizedBox(height: 8),
+                _StatusRow(
+                  label: '地图可用',
+                  value: status == null
+                      ? '...'
+                      : status.mapAvailable
+                      ? '是'
+                      : '否',
+                  valueColor: status == null
+                      ? null
+                      : status.mapAvailable
+                      ? AppTheme.success
+                      : AppTheme.warning,
+                ),
+                const SizedBox(height: 8),
+                _StatusRow(
+                  label: '已采集点数',
+                  value: status == null
+                      ? '...'
+                      : status.pointsCollected.toString(),
+                ),
+              ],
             ),
           ),
           const SizedBox(height: 24),
@@ -222,8 +217,11 @@ class _MappingScreenState extends ConsumerState<MappingScreen> {
             width: double.infinity,
             child: ElevatedButton.icon(
               style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.red,
-                foregroundColor: Colors.white,
+                backgroundColor: AppTheme.danger.withValues(alpha: 0.14),
+                foregroundColor: AppTheme.danger,
+                side: BorderSide(
+                  color: AppTheme.danger.withValues(alpha: 0.42),
+                ),
                 padding: const EdgeInsets.symmetric(vertical: 14),
               ),
               icon: state.loading
@@ -232,7 +230,7 @@ class _MappingScreenState extends ConsumerState<MappingScreen> {
                       height: 16,
                       child: CircularProgressIndicator(
                         strokeWidth: 2,
-                        color: Colors.white,
+                        color: AppTheme.danger,
                       ),
                     )
                   : const Icon(Icons.stop_circle_outlined),
@@ -246,7 +244,7 @@ class _MappingScreenState extends ConsumerState<MappingScreen> {
             const SizedBox(height: 12),
             Text(
               state.error!,
-              style: const TextStyle(color: Colors.red, fontSize: 13),
+              style: const TextStyle(color: AppTheme.danger, fontSize: 13),
             ),
           ],
         ],
@@ -270,7 +268,7 @@ class _MappingScreenState extends ConsumerState<MappingScreen> {
               Navigator.of(context).pop();
               ref.read(mappingProvider.notifier).deleteMap(name);
             },
-            child: const Text('删除', style: TextStyle(color: Colors.red)),
+            child: const Text('删除', style: TextStyle(color: AppTheme.danger)),
           ),
         ],
       ),
@@ -299,17 +297,26 @@ class _MapCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Card(
+    return Container(
       margin: const EdgeInsets.only(bottom: 8),
+      decoration: BoxDecoration(
+        color: AppTheme.subtleFill(context).withValues(alpha: 0.65),
+        border: Border.all(color: AppTheme.borderColor(context)),
+        borderRadius: BorderRadius.circular(10),
+      ),
       child: ListTile(
-        leading: const Icon(Icons.map_outlined, size: 32),
+        leading: const Icon(
+          Icons.map_outlined,
+          size: 28,
+          color: AppTheme.primaryColor,
+        ),
         title: Text(map.name),
         subtitle: Text(
-          '${_formatSize(map.size)}  •  ${_formatDate(map.modifiedTime)}',
+          '${_formatSize(map.size)}  /  ${_formatDate(map.modifiedTime)}',
           style: const TextStyle(fontSize: 12),
         ),
         trailing: IconButton(
-          icon: const Icon(Icons.delete_outline, color: Colors.red),
+          icon: const Icon(Icons.delete_outline, color: AppTheme.danger),
           onPressed: onDelete,
           tooltip: '删除地图',
         ),
@@ -323,24 +330,17 @@ class _StatusRow extends StatelessWidget {
   final String value;
   final Color? valueColor;
 
-  const _StatusRow({
-    required this.label,
-    required this.value,
-    this.valueColor,
-  });
+  const _StatusRow({required this.label, required this.value, this.valueColor});
 
   @override
   Widget build(BuildContext context) {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        Text(label, style: const TextStyle(color: Colors.grey)),
+        Text(label, style: TextStyle(color: AppTheme.mutedText(context))),
         Text(
           value,
-          style: TextStyle(
-            fontWeight: FontWeight.w600,
-            color: valueColor,
-          ),
+          style: TextStyle(fontWeight: FontWeight.w600, color: valueColor),
         ),
       ],
     );

@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import '../../../app/theme.dart';
+import '../../../shared/widgets/console_widgets.dart';
 import 'connection_provider.dart';
 import '../domain/connection_model.dart';
 
@@ -16,9 +18,12 @@ class _ConnectionScreenState extends ConsumerState<ConnectionScreen> {
   Widget build(BuildContext context) {
     final state = ref.watch(connectionProvider);
 
-    return Scaffold(
+    return ConsoleScaffold(
       appBar: AppBar(
-        title: const Text('机器人展位管理'),
+        title: const ConsoleAppBarTitle(
+          title: '机器人展位',
+          subtitle: 'connection manager',
+        ),
         leading: Builder(
           builder: (context) {
             final hasActive = ref.watch(connectionProvider).activeId != null;
@@ -35,19 +40,26 @@ class _ConnectionScreenState extends ConsumerState<ConnectionScreen> {
       ),
       body: state.connections.isEmpty
           ? Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Icon(Icons.wifi_off, size: 64, color: Colors.grey),
-                  const SizedBox(height: 16),
-                  const Text('还没有添加任何展位'),
-                  const SizedBox(height: 8),
-                  ElevatedButton.icon(
-                    icon: const Icon(Icons.add),
-                    label: const Text('添加展位'),
-                    onPressed: () => _showEditDialog(context, null),
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: ConsoleCard(
+                  title: '连接管理',
+                  icon: Icons.wifi_tethering_error_outlined,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const EmptyState(
+                        icon: Icons.wifi_off,
+                        label: '还没有添加任何展位',
+                      ),
+                      ElevatedButton.icon(
+                        icon: const Icon(Icons.add),
+                        label: const Text('添加展位'),
+                        onPressed: () => _showEditDialog(context, null),
+                      ),
+                    ],
                   ),
-                ],
+                ),
               ),
             )
           : ListView.builder(
@@ -56,48 +68,57 @@ class _ConnectionScreenState extends ConsumerState<ConnectionScreen> {
               itemBuilder: (context, i) {
                 final conn = state.connections[i];
                 final isActive = conn.id == state.activeId;
-                return Card(
-                  margin: const EdgeInsets.only(bottom: 8),
-                  child: ListTile(
-                    leading: CircleAvatar(
-                      backgroundColor: isActive ? Colors.cyan : Colors.grey,
-                      child: Icon(
-                        isActive ? Icons.wifi : Icons.wifi_off,
-                        color: Colors.white,
-                        size: 20,
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: ConsoleCard(
+                    padding: EdgeInsets.zero,
+                    child: ListTile(
+                      leading: CircleAvatar(
+                        backgroundColor: isActive
+                            ? AppTheme.primaryColor.withValues(alpha: 0.18)
+                            : AppTheme.slate500.withValues(alpha: 0.18),
+                        child: Icon(
+                          isActive ? Icons.wifi : Icons.wifi_off,
+                          color: isActive
+                              ? AppTheme.primaryColor
+                              : AppTheme.slate500,
+                          size: 20,
+                        ),
                       ),
-                    ),
-                    title: Text(conn.name),
-                    subtitle: Text(conn.baseUrl),
-                    trailing: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        if (!isActive)
-                          TextButton(
-                            onPressed: () => ref
-                                .read(connectionProvider.notifier)
-                                .activate(conn.id),
-                            child: const Text('连接'),
+                      title: Text(conn.name),
+                      subtitle: Text(
+                        conn.baseUrl,
+                        style: const TextStyle(fontFamily: 'monospace'),
+                      ),
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (!isActive)
+                            TextButton(
+                              onPressed: () => ref
+                                  .read(connectionProvider.notifier)
+                                  .activate(conn.id),
+                              child: const Text('连接'),
+                            ),
+                          if (isActive)
+                            const StatusPill(
+                              label: 'ACTIVE',
+                              color: AppTheme.success,
+                            ),
+                          IconButton(
+                            icon: const Icon(Icons.edit_outlined),
+                            tooltip: '编辑',
+                            onPressed: () => _showEditDialog(context, conn),
                           ),
-                        if (isActive)
-                          const Chip(
-                            label: Text('活跃'),
-                            backgroundColor: Colors.cyan,
-                            labelStyle: TextStyle(color: Colors.white),
+                          IconButton(
+                            icon: const Icon(Icons.delete_outline),
+                            color: AppTheme.danger,
+                            tooltip: '删除',
+                            onPressed: () =>
+                                _confirmDelete(context, conn.id, conn.name),
                           ),
-                        IconButton(
-                          icon: const Icon(Icons.edit_outlined),
-                          tooltip: '编辑',
-                          onPressed: () => _showEditDialog(context, conn),
-                        ),
-                        IconButton(
-                          icon: const Icon(Icons.delete_outline),
-                          color: Colors.red,
-                          tooltip: '删除',
-                          onPressed: () =>
-                              _confirmDelete(context, conn.id, conn.name),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
                   ),
                 );
@@ -129,7 +150,7 @@ class _ConnectionScreenState extends ConsumerState<ConnectionScreen> {
               ref.read(connectionProvider.notifier).delete(id);
               Navigator.of(context).pop();
             },
-            child: const Text('删除', style: TextStyle(color: Colors.red)),
+            child: const Text('删除', style: TextStyle(color: AppTheme.danger)),
           ),
         ],
       ),
@@ -146,8 +167,7 @@ class _EditConnectionDialog extends ConsumerStatefulWidget {
       _EditConnectionDialogState();
 }
 
-class _EditConnectionDialogState
-    extends ConsumerState<_EditConnectionDialog> {
+class _EditConnectionDialogState extends ConsumerState<_EditConnectionDialog> {
   final _formKey = GlobalKey<FormState>();
   late final TextEditingController _nameCtrl;
   late final TextEditingController _urlCtrl;
@@ -162,7 +182,8 @@ class _EditConnectionDialogState
     super.initState();
     _nameCtrl = TextEditingController(text: widget.existing?.name ?? '');
     _urlCtrl = TextEditingController(
-        text: widget.existing?.baseUrl ?? 'http://');
+      text: widget.existing?.baseUrl ?? 'http://',
+    );
     _tokenCtrl = TextEditingController();
     // Pre-fill token for edits
     if (_isEdit) _loadToken();
@@ -248,16 +269,14 @@ class _EditConnectionDialogState
               const SizedBox(height: 12),
               TextFormField(
                 controller: _tokenCtrl,
-                decoration: const InputDecoration(
-                  labelText: 'API Token',
-                ),
+                decoration: const InputDecoration(labelText: 'API Token'),
                 obscureText: true,
                 validator: (v) =>
                     (v == null || v.trim().isEmpty) ? '请输入 Token' : null,
               ),
               if (_error != null) ...[
                 const SizedBox(height: 8),
-                Text(_error!, style: const TextStyle(color: Colors.red)),
+                Text(_error!, style: const TextStyle(color: AppTheme.danger)),
               ],
             ],
           ),

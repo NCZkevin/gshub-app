@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../../app/theme.dart';
+import '../../../shared/widgets/console_widgets.dart';
 import 'logs_provider.dart';
 import '../../../shared/domain/app_models.dart';
 
@@ -24,9 +26,9 @@ class _LogsScreenState extends ConsumerState<LogsScreen> {
     final asyncState = ref.watch(logsProvider);
     final isWide = MediaQuery.of(context).size.width > 600;
 
-    return Scaffold(
+    return ConsoleScaffold(
       appBar: AppBar(
-        title: const Text('日志'),
+        title: const ConsoleAppBarTitle(title: '日志', subtitle: 'system trace'),
         actions: [
           asyncState.maybeWhen(
             data: (state) => state.loading
@@ -55,7 +57,7 @@ class _LogsScreenState extends ConsumerState<LogsScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.error_outline, size: 48, color: Colors.red),
+              const Icon(Icons.error_outline, size: 48, color: AppTheme.danger),
               const SizedBox(height: 12),
               Text('加载失败: $e'),
               const SizedBox(height: 12),
@@ -77,31 +79,55 @@ class _LogsScreenState extends ConsumerState<LogsScreen> {
   }
 
   Widget _buildWideLayout(BuildContext context, LogsState state) {
-    return Row(
-      children: [
-        SizedBox(
-          width: 280,
-          child: Column(
-            children: [
-              _SearchBar(controller: _searchController),
-              Expanded(child: _FileList(state: state, isWide: true)),
-            ],
+    return Padding(
+      padding: const EdgeInsets.all(12),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          SizedBox(
+            width: 300,
+            child: ConsoleCard(
+              title: '日志文件',
+              icon: Icons.folder_copy_outlined,
+              padding: EdgeInsets.zero,
+              child: Column(
+                children: [
+                  _SearchBar(controller: _searchController),
+                  Expanded(child: _FileList(state: state, isWide: true)),
+                ],
+              ),
+            ),
           ),
-        ),
-        const VerticalDivider(width: 1),
-        Expanded(
-          child: _ContentView(state: state),
-        ),
-      ],
+          const SizedBox(width: 12),
+          Expanded(
+            child: ConsoleCard(
+              title: '日志内容',
+              icon: Icons.terminal_outlined,
+              padding: EdgeInsets.zero,
+              child: _ContentView(state: state),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
   Widget _buildNarrowLayout(BuildContext context, LogsState state) {
-    return Column(
-      children: [
-        _SearchBar(controller: _searchController),
-        Expanded(child: _FileList(state: state, isWide: false)),
-      ],
+    return Padding(
+      padding: const EdgeInsets.all(12),
+      child: SizedBox.expand(
+        child: ConsoleCard(
+          title: '日志文件',
+          icon: Icons.folder_copy_outlined,
+          padding: EdgeInsets.zero,
+          child: Column(
+            children: [
+              _SearchBar(controller: _searchController),
+              Expanded(child: _FileList(state: state, isWide: false)),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
@@ -121,7 +147,7 @@ class _LogsScreenState extends ConsumerState<LogsScreen> {
               Navigator.of(context).pop();
               ref.read(logsProvider.notifier).cleanup();
             },
-            child: const Text('清理', style: TextStyle(color: Colors.orange)),
+            child: const Text('清理', style: TextStyle(color: AppTheme.warning)),
           ),
         ],
       ),
@@ -152,7 +178,6 @@ class _SearchBar extends ConsumerWidget {
                   },
                 )
               : null,
-          border: const OutlineInputBorder(),
           isDense: true,
         ),
         onChanged: (v) => ref.read(logsProvider.notifier).setSearch(v),
@@ -184,8 +209,9 @@ class _FileList extends ConsumerWidget {
     final files = state.filteredFiles;
 
     if (files.isEmpty) {
-      return const Center(
-        child: Text('暂无日志文件', style: TextStyle(color: Colors.grey)),
+      return const EmptyState(
+        icon: Icons.description_outlined,
+        label: '暂无日志文件',
       );
     }
 
@@ -194,45 +220,64 @@ class _FileList extends ConsumerWidget {
       itemBuilder: (context, i) {
         final file = files[i];
         final isSelected = state.selected == file.name;
-        return ListTile(
-          selected: isSelected,
-          selectedTileColor: Theme.of(context).colorScheme.primaryContainer,
-          leading: const Icon(Icons.description_outlined),
-          title: Text(
-            file.name,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontSize: 13),
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(10, 4, 10, 4),
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: isSelected
+                  ? AppTheme.primaryColor.withValues(alpha: 0.12)
+                  : AppTheme.subtleFill(context).withValues(alpha: 0.44),
+              border: Border.all(
+                color: isSelected
+                    ? AppTheme.primaryColor.withValues(alpha: 0.42)
+                    : AppTheme.borderColor(context),
+              ),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: ListTile(
+              dense: true,
+              leading: Icon(
+                Icons.description_outlined,
+                color: isSelected
+                    ? AppTheme.primaryColor
+                    : AppTheme.mutedText(context),
+              ),
+              title: Text(
+                file.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 13, fontFamily: 'monospace'),
+              ),
+              subtitle: Text(
+                '${_formatSize(file.size)}  ${_formatDate(file.modifiedTime)}',
+                style: const TextStyle(fontSize: 11, fontFamily: 'monospace'),
+              ),
+              trailing: IconButton(
+                icon: const Icon(Icons.delete_outline, size: 18),
+                color: AppTheme.danger,
+                tooltip: '删除',
+                onPressed: () => _confirmDelete(context, ref, file),
+              ),
+              onTap: () {
+                if (isWide) {
+                  ref.read(logsProvider.notifier).selectFile(file.name);
+                } else {
+                  ref.read(logsProvider.notifier).selectFile(file.name);
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => _LogDetailPage(filename: file.name),
+                    ),
+                  );
+                }
+              },
+            ),
           ),
-          subtitle: Text(
-            '${_formatSize(file.size)}  ${_formatDate(file.modifiedTime)}',
-            style: const TextStyle(fontSize: 11),
-          ),
-          trailing: IconButton(
-            icon: const Icon(Icons.delete_outline, size: 18),
-            color: Colors.red,
-            tooltip: '删除',
-            onPressed: () => _confirmDelete(context, ref, file),
-          ),
-          onTap: () {
-            if (isWide) {
-              ref.read(logsProvider.notifier).selectFile(file.name);
-            } else {
-              ref.read(logsProvider.notifier).selectFile(file.name);
-              Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => _LogDetailPage(filename: file.name),
-                ),
-              );
-            }
-          },
         );
       },
     );
   }
 
-  void _confirmDelete(
-      BuildContext context, WidgetRef ref, LogFileInfo file) {
+  void _confirmDelete(BuildContext context, WidgetRef ref, LogFileInfo file) {
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
@@ -248,7 +293,7 @@ class _FileList extends ConsumerWidget {
               Navigator.of(context).pop();
               ref.read(logsProvider.notifier).deleteFile(file.name);
             },
-            child: const Text('删除', style: TextStyle(color: Colors.red)),
+            child: const Text('删除', style: TextStyle(color: AppTheme.danger)),
           ),
         ],
       ),
@@ -264,8 +309,9 @@ class _ContentView extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     if (state.selected == null) {
-      return const Center(
-        child: Text('选择左侧文件以查看内容', style: TextStyle(color: Colors.grey)),
+      return const EmptyState(
+        icon: Icons.terminal_outlined,
+        label: '选择左侧文件以查看内容',
       );
     }
 
@@ -339,17 +385,21 @@ class _ScrollableLogContentState extends State<_ScrollableLogContent> {
             ],
           ),
         ),
-        const Divider(height: 1),
+        Divider(height: 1, color: AppTheme.borderColor(context)),
         Expanded(
-          child: SingleChildScrollView(
-            controller: _scrollController,
-            padding: const EdgeInsets.all(12),
-            child: SelectableText(
-              widget.content.isEmpty ? '(空文件)' : widget.content,
-              style: const TextStyle(
-                fontFamily: 'monospace',
-                fontSize: 12,
-                height: 1.5,
+          child: DecoratedBox(
+            decoration: const BoxDecoration(color: Color(0xFF020617)),
+            child: SingleChildScrollView(
+              controller: _scrollController,
+              padding: const EdgeInsets.all(12),
+              child: SelectableText(
+                widget.content.isEmpty ? '(空文件)' : widget.content,
+                style: const TextStyle(
+                  color: Color(0xFFE2E8F0),
+                  fontFamily: 'monospace',
+                  fontSize: 12,
+                  height: 1.5,
+                ),
               ),
             ),
           ),
@@ -368,8 +418,10 @@ class _LogDetailPage extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final asyncState = ref.watch(logsProvider);
 
-    return Scaffold(
-      appBar: AppBar(title: Text(filename)),
+    return ConsoleScaffold(
+      appBar: AppBar(
+        title: ConsoleAppBarTitle(title: filename, subtitle: 'log detail'),
+      ),
       body: asyncState.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, _) => Center(child: Text('错误: $e')),

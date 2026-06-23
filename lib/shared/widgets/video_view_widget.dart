@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
+import '../../app/theme.dart';
 
 /// Janus WebRTC 视频视图占位
 /// 完整的 Janus 信令接入在 video_view_controller.dart 实现
@@ -8,11 +9,7 @@ class VideoViewWidget extends StatefulWidget {
   final RTCVideoRenderer? renderer;
   final String? placeholderText;
 
-  const VideoViewWidget({
-    super.key,
-    this.renderer,
-    this.placeholderText,
-  });
+  const VideoViewWidget({super.key, this.renderer, this.placeholderText});
 
   @override
   State<VideoViewWidget> createState() => _VideoViewWidgetState();
@@ -24,16 +21,24 @@ class _VideoViewWidgetState extends State<VideoViewWidget> {
     final renderer = widget.renderer;
     if (renderer == null) {
       return Container(
-        color: Colors.black,
+        color: const Color(0xFF020617),
         child: Center(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.videocam_off, size: 48, color: Colors.grey),
+              Icon(
+                Icons.videocam_off,
+                size: 42,
+                color: AppTheme.slate400.withValues(alpha: 0.8),
+              ),
               const SizedBox(height: 8),
               Text(
                 widget.placeholderText ?? '视频流未连接',
-                style: const TextStyle(color: Colors.grey),
+                style: TextStyle(
+                  color: AppTheme.slate400,
+                  fontFamily: 'monospace',
+                  fontSize: 12,
+                ),
               ),
             ],
           ),

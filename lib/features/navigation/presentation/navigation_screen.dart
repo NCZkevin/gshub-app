@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../../app/theme.dart';
 import '../../../shared/domain/app_models.dart';
+import '../../../shared/widgets/console_widgets.dart';
 import '../../../shared/widgets/occupancy_map.dart';
 import 'navigation_provider.dart';
 
@@ -45,17 +47,17 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen>
   Color _statusColor(NavigationStatus status) {
     switch (status) {
       case NavigationStatus.navigating:
-        return Colors.blue;
+        return AppTheme.primaryColor;
       case NavigationStatus.arrived:
-        return Colors.green;
+        return AppTheme.success;
       case NavigationStatus.failed:
-        return Colors.red;
+        return AppTheme.danger;
       case NavigationStatus.paused:
-        return Colors.orange;
+        return AppTheme.warning;
       case NavigationStatus.stopped:
-        return Colors.grey;
+        return AppTheme.slate500;
       case NavigationStatus.vacant:
-        return Colors.grey.shade400;
+        return AppTheme.slate400;
     }
   }
 
@@ -83,15 +85,15 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen>
     final navAsync = ref.watch(navigationProvider);
 
     return navAsync.when(
-      loading: () => const Scaffold(
+      loading: () => const ConsoleScaffold(
         body: Center(child: CircularProgressIndicator()),
       ),
-      error: (e, _) => Scaffold(
+      error: (e, _) => ConsoleScaffold(
         body: Center(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.error_outline, size: 48, color: Colors.red),
+              const Icon(Icons.error_outline, size: 48, color: AppTheme.danger),
               const SizedBox(height: 12),
               Text('加载失败: $e', textAlign: TextAlign.center),
               const SizedBox(height: 12),
@@ -106,7 +108,7 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen>
       data: (navState) {
         switch (navState.viewState) {
           case NavViewState.checking:
-            return const Scaffold(
+            return const ConsoleScaffold(
               body: Center(child: CircularProgressIndicator()),
             );
           case NavViewState.setup:
@@ -121,85 +123,100 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen>
   // ─── Setup screen ───────────────────────────────────────────
 
   Widget _buildSetupScreen(NavigationState navState) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('导航配置')),
-      body: Padding(
-        padding: const EdgeInsets.all(24.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            // Error banner
-            if (navState.error != null) ...[
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.red.shade50,
-                  border: Border.all(color: Colors.red.shade200),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Text(
-                  navState.error!,
-                  style: TextStyle(color: Colors.red.shade700),
-                ),
-              ),
-              const SizedBox(height: 16),
-            ],
-            const Text('选择地图', style: TextStyle(fontWeight: FontWeight.bold)),
-            const SizedBox(height: 8),
-            DropdownButton<String>(
-              isExpanded: true,
-              value: navState.selectedMap,
-              hint: const Text('请选择地图'),
-              items: navState.maps.map((m) {
-                return DropdownMenuItem<String>(
-                  value: m.name,
-                  child: Text(m.name),
-                );
-              }).toList(),
-              onChanged: navState.loading
-                  ? null
-                  : (name) {
-                      if (name != null) {
-                        ref
-                            .read(navigationProvider.notifier)
-                            .selectMap(name);
-                      }
-                    },
-            ),
-            const SizedBox(height: 24),
-            Row(
+    return ConsoleScaffold(
+      appBar: AppBar(
+        title: const ConsoleAppBarTitle(
+          title: '导航配置',
+          subtitle: 'map selection',
+        ),
+      ),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          ConsoleCard(
+            title: '启动导航',
+            icon: Icons.route_outlined,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                const Text('重定位模式'),
-                const Spacer(),
-                Switch(
-                  value: navState.relocalization,
+                // Error banner
+                if (navState.error != null) ...[
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: AppTheme.danger.withValues(alpha: 0.1),
+                      border: Border.all(
+                        color: AppTheme.danger.withValues(alpha: 0.35),
+                      ),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
+                      navState.error!,
+                      style: const TextStyle(color: AppTheme.danger),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                ],
+                Text('选择地图', style: Theme.of(context).textTheme.titleSmall),
+                const SizedBox(height: 8),
+                DropdownButtonFormField<String>(
+                  key: ValueKey(navState.selectedMap),
+                  isExpanded: true,
+                  initialValue: navState.selectedMap,
+                  hint: const Text('请选择地图'),
+                  items: navState.maps.map((m) {
+                    return DropdownMenuItem<String>(
+                      value: m.name,
+                      child: Text(m.name),
+                    );
+                  }).toList(),
                   onChanged: navState.loading
                       ? null
-                      : (_) => ref
-                          .read(navigationProvider.notifier)
-                          .toggleRelocalization(),
+                      : (name) {
+                          if (name != null) {
+                            ref
+                                .read(navigationProvider.notifier)
+                                .selectMap(name);
+                          }
+                        },
+                ),
+                const SizedBox(height: 24),
+                Row(
+                  children: [
+                    const Text('重定位模式'),
+                    const Spacer(),
+                    Switch(
+                      value: navState.relocalization,
+                      onChanged: navState.loading
+                          ? null
+                          : (_) => ref
+                                .read(navigationProvider.notifier)
+                                .toggleRelocalization(),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 32),
+                ElevatedButton(
+                  onPressed: navState.loading || navState.selectedMap == null
+                      ? null
+                      : () => ref
+                            .read(navigationProvider.notifier)
+                            .startNavContainer(),
+                  style: ElevatedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                  ),
+                  child: navState.loading
+                      ? const SizedBox(
+                          height: 20,
+                          width: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Text('启动导航', style: TextStyle(fontSize: 16)),
                 ),
               ],
             ),
-            const SizedBox(height: 32),
-            ElevatedButton(
-              onPressed: navState.loading || navState.selectedMap == null
-                  ? null
-                  : () =>
-                      ref.read(navigationProvider.notifier).startNavContainer(),
-              style: ElevatedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(vertical: 16),
-              ),
-              child: navState.loading
-                  ? const SizedBox(
-                      height: 20,
-                      width: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Text('启动导航', style: TextStyle(fontSize: 16)),
-            ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -207,23 +224,15 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen>
   // ─── Active screen ──────────────────────────────────────────
 
   Widget _buildActiveScreen(NavigationState navState) {
-    return Scaffold(
+    return ConsoleScaffold(
       appBar: AppBar(
-        title: const Text('导航'),
+        title: const ConsoleAppBarTitle(title: '导航', subtitle: 'live map'),
         actions: [
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            child: Chip(
-              label: Text(
-                _statusLabel(navState.navStatus),
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 12,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              backgroundColor: _statusColor(navState.navStatus),
-              padding: EdgeInsets.zero,
+            child: StatusPill(
+              label: _statusLabel(navState.navStatus),
+              color: _statusColor(navState.navStatus),
             ),
           ),
         ],
@@ -233,11 +242,21 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen>
           // Map area
           Expanded(
             flex: 3,
-            child: _buildMapArea(navState),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 0),
+              child: ConsoleCard(
+                title: '地图画布',
+                icon: Icons.public_outlined,
+                padding: EdgeInsets.zero,
+                child: _buildMapArea(navState),
+              ),
+            ),
           ),
           // Control panel
-          Container(
-            color: Theme.of(context).colorScheme.surface,
+          ConsoleCard(
+            title: '任务控制',
+            icon: Icons.tune_outlined,
+            padding: EdgeInsets.zero,
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -250,7 +269,7 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen>
                   ],
                 ),
                 SizedBox(
-                  height: 180,
+                  height: 186,
                   child: TabBarView(
                     controller: _tabController,
                     children: [
@@ -280,9 +299,7 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen>
       robotPose: navState.robotPose,
       trajectory: navState.trajectory,
       goalPoint: navState.goalPoint,
-      waypoints: navState.waypoints
-          .map((w) => (w.x, w.y))
-          .toList(),
+      waypoints: navState.waypoints.map((w) => (w.x, w.y)).toList(),
       plannedPath: navState.plannedPath,
       onTapWorld: (wx, wy) {
         if (navState.navMode == NavMode.singlePoint) {
@@ -294,11 +311,20 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen>
       },
     );
 
-    return InteractiveViewer(
-      transformationController: _transformationController,
-      minScale: 0.5,
-      maxScale: 8.0,
-      child: mapWidget,
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: const Color(0xFF020617),
+        borderRadius: BorderRadius.circular(13),
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(13),
+        child: InteractiveViewer(
+          transformationController: _transformationController,
+          minScale: 0.5,
+          maxScale: 8.0,
+          child: mapWidget,
+        ),
+      ),
     );
   }
 
@@ -318,17 +344,17 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen>
               style: const TextStyle(fontSize: 13),
             )
           else
-            const Text(
+            Text(
               '点击地图选择目标点',
-              style: TextStyle(color: Colors.grey),
+              style: TextStyle(color: AppTheme.mutedText(context)),
             ),
           const SizedBox(height: 12),
           ElevatedButton.icon(
             onPressed: goal == null
                 ? null
                 : () => ref
-                    .read(navigationProvider.notifier)
-                    .navigateTo(goal.$1, goal.$2),
+                      .read(navigationProvider.notifier)
+                      .navigateTo(goal.$1, goal.$2),
             icon: const Icon(Icons.navigation, size: 16),
             label: const Text('开始导航'),
           ),
@@ -351,10 +377,12 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen>
                 child: SizedBox(
                   height: 80,
                   child: navState.waypoints.isEmpty
-                      ? const Center(
+                      ? Center(
                           child: Text(
                             '点击地图添加航点',
-                            style: TextStyle(color: Colors.grey),
+                            style: TextStyle(
+                              color: AppTheme.mutedText(context),
+                            ),
                           ),
                         )
                       : ListView.separated(
@@ -389,15 +417,15 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen>
                     child: TextField(
                       controller: _cyclesController,
                       keyboardType: TextInputType.number,
-                      inputFormatters: [
-                        FilteringTextInputFormatter.digitsOnly,
-                      ],
+                      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                       textAlign: TextAlign.center,
                       decoration: const InputDecoration(
                         isDense: true,
                         border: OutlineInputBorder(),
-                        contentPadding:
-                            EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+                        contentPadding: EdgeInsets.symmetric(
+                          horizontal: 4,
+                          vertical: 8,
+                        ),
                       ),
                     ),
                   ),
@@ -410,11 +438,8 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen>
             onPressed: navState.waypoints.isEmpty
                 ? null
                 : () {
-                    final cycles =
-                        int.tryParse(_cyclesController.text) ?? 1;
-                    ref
-                        .read(navigationProvider.notifier)
-                        .startPathNav(cycles);
+                    final cycles = int.tryParse(_cyclesController.text) ?? 1;
+                    ref.read(navigationProvider.notifier).startPathNav(cycles);
                   },
             icon: const Icon(Icons.route, size: 16),
             label: const Text('开始路径导航'),
@@ -437,9 +462,9 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen>
             style: const TextStyle(fontSize: 14),
           ),
           const SizedBox(height: 8),
-          const Text(
+          Text(
             '点击地图记录机器人经过的路径点',
-            style: TextStyle(color: Colors.grey, fontSize: 12),
+            style: TextStyle(color: AppTheme.mutedText(context), fontSize: 12),
           ),
           const SizedBox(height: 12),
           Row(
@@ -450,9 +475,11 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen>
                     ? null
                     : () {
                         // Clear all recorded waypoints
-                        for (var i = navState.waypoints.length - 1;
-                            i >= 0;
-                            i--) {
+                        for (
+                          var i = navState.waypoints.length - 1;
+                          i >= 0;
+                          i--
+                        ) {
                           ref
                               .read(navigationProvider.notifier)
                               .removeWaypoint(i);
@@ -493,10 +520,8 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen>
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceContainerHighest,
-        border: Border(
-          top: BorderSide(color: Theme.of(context).dividerColor),
-        ),
+        color: AppTheme.subtleFill(context).withValues(alpha: 0.82),
+        border: Border(top: BorderSide(color: AppTheme.borderColor(context))),
       ),
       child: Row(
         children: [
@@ -505,14 +530,14 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen>
             _ControlButton(
               icon: Icons.pause,
               label: '暂停',
-              color: Colors.orange,
+              color: AppTheme.warning,
               onPressed: notifier.pause,
             )
           else if (isPaused)
             _ControlButton(
               icon: Icons.play_arrow,
               label: '继续',
-              color: Colors.blue,
+              color: AppTheme.primaryColor,
               onPressed: notifier.resume,
             )
           else
@@ -522,7 +547,7 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen>
           _ControlButton(
             icon: Icons.home,
             label: '回原点',
-            color: Colors.teal,
+            color: AppTheme.success,
             onPressed: notifier.returnToOrigin,
           ),
           const SizedBox(width: 12),
@@ -530,7 +555,7 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen>
           _ControlButton(
             icon: Icons.stop,
             label: '停止导航',
-            color: Colors.red,
+            color: AppTheme.danger,
             onPressed: notifier.stopNav,
           ),
         ],
@@ -556,13 +581,14 @@ class _ControlButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ElevatedButton.icon(
+    return OutlinedButton.icon(
       onPressed: onPressed,
       icon: Icon(icon, size: 18),
       label: Text(label, style: const TextStyle(fontSize: 12)),
-      style: ElevatedButton.styleFrom(
-        backgroundColor: color,
-        foregroundColor: Colors.white,
+      style: OutlinedButton.styleFrom(
+        backgroundColor: color.withValues(alpha: 0.12),
+        foregroundColor: color,
+        side: BorderSide(color: color.withValues(alpha: 0.44)),
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
         minimumSize: Size.zero,
         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
