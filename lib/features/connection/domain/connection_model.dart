@@ -3,7 +3,7 @@ import 'package:freezed_annotation/freezed_annotation.dart';
 part 'connection_model.freezed.dart';
 part 'connection_model.g.dart';
 
-/// 机器人展位连接配置（明文部分存 SharedPreferences，Token 存 SecureStorage）
+/// 机器连接配置（明文部分存 SharedPreferences，Token 存 SecureStorage）
 @freezed
 class RobotConnection with _$RobotConnection {
   const factory RobotConnection({

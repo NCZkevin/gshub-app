@@ -21,14 +21,22 @@ class _ConnectionScreenState extends ConsumerState<ConnectionScreen> {
     return ConsoleScaffold(
       appBar: AppBar(
         title: const ConsoleAppBarTitle(
-          title: '机器人展位',
+          title: '机器列表',
           subtitle: 'connection manager',
         ),
         leading: Builder(
           builder: (context) {
             final hasActive = ref.watch(connectionProvider).activeId != null;
             if (!hasActive) return const SizedBox.shrink();
-            return BackButton(onPressed: () => context.pop());
+            return BackButton(
+              onPressed: () {
+                if (context.canPop()) {
+                  context.pop();
+                } else {
+                  context.go('/settings');
+                }
+              },
+            );
           },
         ),
         actions: [
@@ -50,11 +58,11 @@ class _ConnectionScreenState extends ConsumerState<ConnectionScreen> {
                     children: [
                       const EmptyState(
                         icon: Icons.wifi_off,
-                        label: '还没有添加任何展位',
+                        label: '还没有添加任何机器',
                       ),
                       ElevatedButton.icon(
                         icon: const Icon(Icons.add),
-                        label: const Text('添加展位'),
+                        label: const Text('添加机器'),
                         onPressed: () => _showEditDialog(context, null),
                       ),
                     ],
@@ -137,18 +145,18 @@ class _ConnectionScreenState extends ConsumerState<ConnectionScreen> {
   void _confirmDelete(BuildContext context, String id, String name) {
     showDialog(
       context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('删除展位'),
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('删除机器'),
         content: Text('确认删除「$name」？'),
         actions: [
           TextButton(
-            onPressed: () => Navigator.of(context).pop(),
+            onPressed: () => Navigator.of(dialogContext).pop(),
             child: const Text('取消'),
           ),
           TextButton(
             onPressed: () {
               ref.read(connectionProvider.notifier).delete(id);
-              Navigator.of(context).pop();
+              Navigator.of(dialogContext).pop();
             },
             child: const Text('删除', style: TextStyle(color: AppTheme.danger)),
           ),
@@ -239,7 +247,7 @@ class _EditConnectionDialogState extends ConsumerState<_EditConnectionDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: Text(_isEdit ? '编辑展位' : '添加展位'),
+      title: Text(_isEdit ? '编辑机器' : '添加机器'),
       content: Form(
         key: _formKey,
         child: SingleChildScrollView(
@@ -248,7 +256,7 @@ class _EditConnectionDialogState extends ConsumerState<_EditConnectionDialog> {
             children: [
               TextFormField(
                 controller: _nameCtrl,
-                decoration: const InputDecoration(labelText: '展位名称'),
+                decoration: const InputDecoration(labelText: '机器名称'),
                 validator: (v) =>
                     (v == null || v.trim().isEmpty) ? '请输入名称' : null,
               ),

@@ -23,24 +23,28 @@ class SettingsScreen extends ConsumerWidget {
         ),
       ),
       body: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(12),
         children: [
-          // ─── 展位列表 ────────────────────────────────────────
+          // ─── 机器列表 ────────────────────────────────────────
           ConsoleCard(
-            title: '展位列表',
+            title: '机器列表',
             icon: Icons.wifi_tethering,
             trailing: TextButton(
-              onPressed: () => context.go('/connection'),
+              onPressed: () => context.push('/connection'),
               child: const Text('管理'),
             ),
             child: Column(
               children: [
                 ListTile(
+                  dense: true,
+                  visualDensity: VisualDensity.compact,
                   contentPadding: EdgeInsets.zero,
+                  minLeadingWidth: 28,
                   leading: Icon(
                     connectionState.active != null
                         ? Icons.wifi
                         : Icons.wifi_off,
+                    size: 20,
                     color: connectionState.active != null
                         ? AppTheme.success
                         : AppTheme.slate500,
@@ -49,10 +53,14 @@ class SettingsScreen extends ConsumerWidget {
                     connectionState.active != null
                         ? connectionState.active!.name
                         : '未连接',
+                    style: _titleStyle(context),
                   ),
                   subtitle: connectionState.active != null
-                      ? Text(connectionState.active!.baseUrl)
-                      : const Text('请先连接展位'),
+                      ? Text(
+                          connectionState.active!.baseUrl,
+                          style: _monoSubtitleStyle(context),
+                        )
+                      : Text('请先连接机器', style: _subtitleStyle(context)),
                   trailing: StatusPill(
                     label: connectionState.active != null
                         ? 'ACTIVE'
@@ -67,7 +75,7 @@ class SettingsScreen extends ConsumerWidget {
                   Align(
                     alignment: Alignment.centerLeft,
                     child: Text(
-                      '所有展位',
+                      '所有机器',
                       style: Theme.of(context).textTheme.titleSmall,
                     ),
                   ),
@@ -76,7 +84,9 @@ class SettingsScreen extends ConsumerWidget {
                     final isActive = conn.id == connectionState.activeId;
                     return ListTile(
                       dense: true,
+                      visualDensity: VisualDensity.compact,
                       contentPadding: EdgeInsets.zero,
+                      minLeadingWidth: 26,
                       leading: Icon(
                         isActive ? Icons.wifi : Icons.wifi_off,
                         size: 18,
@@ -113,17 +123,22 @@ class SettingsScreen extends ConsumerWidget {
               ],
             ),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 12),
 
           // ─── 主题 ─────────────────────────────────────────────
           ConsoleCard(
             title: '主题',
             icon: Icons.dark_mode_outlined,
             child: SwitchListTile(
+              dense: true,
+              visualDensity: VisualDensity.compact,
               contentPadding: EdgeInsets.zero,
-              secondary: const Icon(Icons.dark_mode_outlined),
-              title: const Text('深色模式'),
-              subtitle: Text(themeMode == ThemeMode.dark ? '已启用' : '已关闭'),
+              secondary: const Icon(Icons.dark_mode_outlined, size: 20),
+              title: Text('深色模式', style: _titleStyle(context)),
+              subtitle: Text(
+                themeMode == ThemeMode.dark ? '已启用' : '已关闭',
+                style: _subtitleStyle(context),
+              ),
               value: themeMode == ThemeMode.dark,
               onChanged: (v) {
                 ref
@@ -132,22 +147,31 @@ class SettingsScreen extends ConsumerWidget {
               },
             ),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 12),
 
           // ─── 语言 ─────────────────────────────────────────────
           ConsoleCard(
             title: '语言',
             icon: Icons.language,
             child: ListTile(
+              dense: true,
+              visualDensity: VisualDensity.compact,
               contentPadding: EdgeInsets.zero,
-              leading: const Icon(Icons.language),
-              title: const Text('显示语言'),
+              minLeadingWidth: 28,
+              leading: const Icon(Icons.language, size: 20),
+              title: Text('显示语言', style: _titleStyle(context)),
               trailing: DropdownButton<String>(
                 value: locale?.languageCode ?? 'zh',
                 underline: const SizedBox.shrink(),
                 items: const [
-                  DropdownMenuItem(value: 'zh', child: Text('中文')),
-                  DropdownMenuItem(value: 'en', child: Text('English')),
+                  DropdownMenuItem(
+                    value: 'zh',
+                    child: Text('中文', style: TextStyle(fontSize: 14)),
+                  ),
+                  DropdownMenuItem(
+                    value: 'en',
+                    child: Text('English', style: TextStyle(fontSize: 14)),
+                  ),
                 ],
                 onChanged: (v) {
                   if (v == null) return;
@@ -156,7 +180,7 @@ class SettingsScreen extends ConsumerWidget {
               ),
             ),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 12),
 
           // ─── 关于 ─────────────────────────────────────────────
           ConsoleCard(
@@ -165,19 +189,22 @@ class SettingsScreen extends ConsumerWidget {
             child: Column(
               children: [
                 ListTile(
+                  dense: true,
+                  visualDensity: VisualDensity.compact,
                   contentPadding: EdgeInsets.zero,
-                  leading: const Icon(Icons.info_outline),
-                  title: const Text('应用版本'),
-                  trailing: Text(
-                    '1.0.0',
-                    style: TextStyle(color: AppTheme.mutedText(context)),
-                  ),
+                  minLeadingWidth: 28,
+                  leading: const Icon(Icons.info_outline, size: 20),
+                  title: Text('应用版本', style: _titleStyle(context)),
+                  trailing: Text('1.0.0', style: _monoSubtitleStyle(context)),
                 ),
-                const ListTile(
+                ListTile(
+                  dense: true,
+                  visualDensity: VisualDensity.compact,
                   contentPadding: EdgeInsets.zero,
-                  leading: Icon(Icons.android),
-                  title: Text('SysApp'),
-                  subtitle: Text('机器人控制系统'),
+                  minLeadingWidth: 28,
+                  leading: const Icon(Icons.android, size: 20),
+                  title: Text('SysApp', style: _titleStyle(context)),
+                  subtitle: Text('机器人控制系统', style: _subtitleStyle(context)),
                 ),
               ],
             ),
@@ -187,4 +214,14 @@ class SettingsScreen extends ConsumerWidget {
       ),
     );
   }
+
+  TextStyle? _titleStyle(BuildContext context) => Theme.of(
+    context,
+  ).textTheme.bodyMedium?.copyWith(fontSize: 14, fontWeight: FontWeight.w700);
+
+  TextStyle? _subtitleStyle(BuildContext context) =>
+      Theme.of(context).textTheme.bodySmall?.copyWith(fontSize: 12);
+
+  TextStyle? _monoSubtitleStyle(BuildContext context) =>
+      _subtitleStyle(context)?.copyWith(fontFamily: 'monospace');
 }

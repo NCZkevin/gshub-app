@@ -2,7 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../features/connection/presentation/connection_provider.dart';
 import '../domain/app_models.dart';
 
-/// 设备基础信息（应用启动后拉取一次，展位切换时重新拉取）
+/// 设备基础信息（应用启动后拉取一次，机器切换时重新拉取）
 final deviceInfoProvider = FutureProvider<DeviceInfo?>((ref) async {
   final client = await ref.watch(dioClientFutureProvider.future);
   if (client == null) return null;

@@ -143,25 +143,25 @@ abstract class AppLocalizations {
   /// No description provided for @addConnection.
   ///
   /// In zh, this message translates to:
-  /// **'添加展位'**
+  /// **'添加机器'**
   String get addConnection;
 
   /// No description provided for @editConnection.
   ///
   /// In zh, this message translates to:
-  /// **'编辑展位'**
+  /// **'编辑机器'**
   String get editConnection;
 
   /// No description provided for @deleteConnection.
   ///
   /// In zh, this message translates to:
-  /// **'删除展位'**
+  /// **'删除机器'**
   String get deleteConnection;
 
   /// No description provided for @connectionName.
   ///
   /// In zh, this message translates to:
-  /// **'展位名称'**
+  /// **'机器名称'**
   String get connectionName;
 
   /// No description provided for @serverAddress.

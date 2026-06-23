@@ -30,16 +30,16 @@ class AppLocalizationsZh extends AppLocalizations {
   String get connection => '连接管理';
 
   @override
-  String get addConnection => '添加展位';
+  String get addConnection => '添加机器';
 
   @override
-  String get editConnection => '编辑展位';
+  String get editConnection => '编辑机器';
 
   @override
-  String get deleteConnection => '删除展位';
+  String get deleteConnection => '删除机器';
 
   @override
-  String get connectionName => '展位名称';
+  String get connectionName => '机器名称';
 
   @override
   String get serverAddress => '服务器地址';

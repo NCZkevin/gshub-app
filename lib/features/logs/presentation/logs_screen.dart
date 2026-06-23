@@ -167,17 +167,17 @@ class _LogsScreenState extends ConsumerState<LogsScreen> {
   void _confirmCleanup(BuildContext context) {
     showDialog(
       context: context,
-      builder: (_) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         title: const Text('清理日志'),
         content: const Text('确认清理所有旧日志文件？'),
         actions: [
           TextButton(
-            onPressed: () => Navigator.of(context).pop(),
+            onPressed: () => Navigator.of(dialogContext).pop(),
             child: const Text('取消'),
           ),
           TextButton(
             onPressed: () {
-              Navigator.of(context).pop();
+              Navigator.of(dialogContext).pop();
               ref.read(logsProvider.notifier).cleanup();
             },
             child: const Text('清理', style: TextStyle(color: AppTheme.warning)),
@@ -326,17 +326,17 @@ class _FileList extends ConsumerWidget {
   void _confirmDelete(BuildContext context, WidgetRef ref, LogFileInfo file) {
     showDialog(
       context: context,
-      builder: (_) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         title: const Text('删除日志'),
         content: Text('确认删除「${file.name}」？'),
         actions: [
           TextButton(
-            onPressed: () => Navigator.of(context).pop(),
+            onPressed: () => Navigator.of(dialogContext).pop(),
             child: const Text('取消'),
           ),
           TextButton(
             onPressed: () {
-              Navigator.of(context).pop();
+              Navigator.of(dialogContext).pop();
               ref.read(logsProvider.notifier).deleteFile(file.name);
             },
             child: const Text('删除', style: TextStyle(color: AppTheme.danger)),

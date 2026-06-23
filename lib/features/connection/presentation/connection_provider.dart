@@ -70,7 +70,7 @@ class ConnectionNotifier extends Notifier<ConnectionState> {
       await repo.saveTerminalToken(id, terminalToken);
     }
     state = state.copyWith(connections: repo.loadAll());
-    // 自动选为活跃展位（如果是第一个）
+    // 自动选为活跃机器（如果是第一个）
     if (state.connections.length == 1) await activate(id);
   }
 
