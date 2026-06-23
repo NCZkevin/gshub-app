@@ -59,7 +59,18 @@ dev_dependencies:
 
   # Testing
   mocktail: ^1.0.4
+  flutter_launcher_icons: ^0.14.4
 
 flutter:
   uses-material-design: true
   generate: true
+
+flutter_launcher_icons:
+  android: true
+  ios: true
+  macos:
+    generate: true
+  web:
+    generate: true
+  image_path: assets/icon/app_icon.png
+  remove_alpha_ios: true
