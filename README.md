@@ -1,10 +1,10 @@
-# sysapp
+# GSHUB App
 
-A new Flutter project.
+Robot controller multi-platform app built with Flutter.
 
-## Getting Started
+## Development
 
-This project is a starting point for a Flutter application.
+See [docs/running.md](docs/running.md) for setup, platform-specific run commands, build commands, and common troubleshooting notes.
 
 A few resources to get you started if this is your first Flutter project:
 
