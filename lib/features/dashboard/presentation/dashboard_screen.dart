@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../app/theme.dart';
@@ -5,7 +7,6 @@ import '../../../core/websocket/ws_connection_manager.dart';
 import '../../../features/connection/presentation/connection_provider.dart';
 import '../../../shared/domain/app_models.dart';
 import '../../../shared/widgets/console_widgets.dart';
-import '../../../shared/widgets/joystick_widget.dart';
 import '../../../shared/widgets/video_view_widget.dart';
 import 'dashboard_provider.dart';
 
@@ -28,6 +29,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
 
     final robotInfo = dashAsync.whenOrNull(data: (d) => d.robotInfo);
     final connected = robotInfo?.connected == true;
+    final battery = robotInfo?.battery;
 
     return ConsoleScaffold(
       appBar: AppBar(
@@ -36,6 +38,14 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
           subtitle: robotInfo?.robotType ?? 'robot console',
         ),
         actions: [
+          if (battery != null) ...[
+            StatusPill(
+              label: '$battery%',
+              color: _batteryColor(battery),
+              icon: _batteryIcon(battery),
+            ),
+            const SizedBox(width: 8),
+          ],
           StatusPill(
             label: connected ? 'CONNECTED' : 'OFFLINE',
             color: connected ? AppTheme.success : AppTheme.danger,
@@ -64,6 +74,18 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
               ),
       ),
     );
+  }
+
+  Color _batteryColor(int battery) {
+    if (battery <= 20) return AppTheme.danger;
+    if (battery <= 40) return AppTheme.warning;
+    return AppTheme.success;
+  }
+
+  IconData _batteryIcon(int battery) {
+    if (battery <= 20) return Icons.battery_alert_outlined;
+    if (battery <= 40) return Icons.battery_3_bar_outlined;
+    return Icons.battery_full_outlined;
   }
 
   String? _janusWsUrl(String? baseUrl) {
@@ -110,15 +132,7 @@ class _WideLayout extends ConsumerWidget {
                   data: data,
                   wsManager: wsManager,
                   speedMultiplier: speedMultiplier,
-                ),
-                const SizedBox(height: 12),
-                Slider(
-                  value: speedMultiplier,
-                  min: 0.1,
-                  max: 1.0,
-                  divisions: 9,
-                  label: '速度 ${(speedMultiplier * 100).round()}%',
-                  onChanged: onSpeedChanged,
+                  onSpeedChanged: onSpeedChanged,
                 ),
                 const SizedBox(height: 12),
                 _ServicesCard(data: data),
@@ -183,15 +197,7 @@ class _NarrowLayout extends ConsumerWidget {
             data: data,
             wsManager: wsManager,
             speedMultiplier: speedMultiplier,
-          ),
-          const SizedBox(height: 4),
-          Slider(
-            value: speedMultiplier,
-            min: 0.1,
-            max: 1.0,
-            divisions: 9,
-            label: '速度 ${(speedMultiplier * 100).round()}%',
-            onChanged: onSpeedChanged,
+            onSpeedChanged: onSpeedChanged,
           ),
           const SizedBox(height: 12),
           _ServicesCard(data: data),
@@ -629,42 +635,436 @@ class _StreamPane extends StatelessWidget {
   }
 }
 
-class _TeleopCard extends StatelessWidget {
+enum _DriveDirection { forward, backward, left, right, turnLeft, turnRight }
+
+class _TeleopCard extends StatefulWidget {
   final DashboardState data;
   final WsConnectionManager wsManager;
   final double speedMultiplier;
+  final void Function(double) onSpeedChanged;
 
   const _TeleopCard({
     required this.data,
     required this.wsManager,
     required this.speedMultiplier,
+    required this.onSpeedChanged,
+  });
+
+  @override
+  State<_TeleopCard> createState() => _TeleopCardState();
+}
+
+class _TeleopCardState extends State<_TeleopCard> {
+  static const _holdInterval = Duration(milliseconds: 200);
+  static const _maxLinear = 1.0;
+  static const _maxAngular = 1.5;
+
+  Timer? _holdTimer;
+  _DriveDirection? _activeDirection;
+
+  @override
+  void dispose() {
+    _stopHold(sendStop: true, updateState: false);
+    super.dispose();
+  }
+
+  void _startHold(_DriveDirection direction) {
+    _holdTimer?.cancel();
+    setState(() => _activeDirection = direction);
+    _sendDirection(direction);
+    _holdTimer = Timer.periodic(
+      _holdInterval,
+      (_) => _sendDirection(direction),
+    );
+  }
+
+  void _stopHold({bool sendStop = true, bool updateState = true}) {
+    _holdTimer?.cancel();
+    _holdTimer = null;
+    if (updateState && mounted) setState(() => _activeDirection = null);
+    if (sendStop) widget.wsManager.sendStop();
+  }
+
+  void _sendDirection(_DriveDirection direction) {
+    final speed = widget.speedMultiplier;
+    switch (direction) {
+      case _DriveDirection.forward:
+        widget.wsManager.sendCmdVel(_maxLinear * speed, 0);
+      case _DriveDirection.backward:
+        widget.wsManager.sendCmdVel(-_maxLinear * speed, 0);
+      case _DriveDirection.left:
+        widget.wsManager.sendCmdVel(0, 0, linearY: _maxLinear * speed);
+      case _DriveDirection.right:
+        widget.wsManager.sendCmdVel(0, 0, linearY: -_maxLinear * speed);
+      case _DriveDirection.turnLeft:
+        widget.wsManager.sendCmdVel(0, _maxAngular * speed);
+      case _DriveDirection.turnRight:
+        widget.wsManager.sendCmdVel(0, -_maxAngular * speed);
+    }
+  }
+
+  ({double linearX, double linearY, double angular}) get _currentVelocity {
+    final speed = widget.speedMultiplier;
+    return switch (_activeDirection) {
+      _DriveDirection.forward => (
+        linearX: _maxLinear * speed,
+        linearY: 0,
+        angular: 0,
+      ),
+      _DriveDirection.backward => (
+        linearX: -_maxLinear * speed,
+        linearY: 0,
+        angular: 0,
+      ),
+      _DriveDirection.left => (
+        linearX: 0,
+        linearY: _maxLinear * speed,
+        angular: 0,
+      ),
+      _DriveDirection.right => (
+        linearX: 0,
+        linearY: -_maxLinear * speed,
+        angular: 0,
+      ),
+      _DriveDirection.turnLeft => (
+        linearX: 0,
+        linearY: 0,
+        angular: _maxAngular * speed,
+      ),
+      _DriveDirection.turnRight => (
+        linearX: 0,
+        linearY: 0,
+        angular: -_maxAngular * speed,
+      ),
+      null => (linearX: 0, linearY: 0, angular: 0),
+    };
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final motionRunning =
+        widget.data.servicesStatus?['motion']?['status'] == 'running';
+    final velocity = _currentVelocity;
+    return ConsoleCard(
+      title: '遥控器',
+      icon: Icons.gamepad_outlined,
+      child: Column(
+        children: [
+          _TeleopStatusBar(
+            motionRunning: motionRunning,
+            activeDirection: _activeDirection,
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            width: 176,
+            height: 176,
+            child: GridView.count(
+              crossAxisCount: 3,
+              physics: const NeverScrollableScrollPhysics(),
+              mainAxisSpacing: 8,
+              crossAxisSpacing: 8,
+              children: [
+                _DriveButton(
+                  icon: Icons.rotate_left_rounded,
+                  label: '左转',
+                  active: _activeDirection == _DriveDirection.turnLeft,
+                  onDown: () => _startHold(_DriveDirection.turnLeft),
+                  onUp: _stopHold,
+                ),
+                _DriveButton(
+                  icon: Icons.keyboard_arrow_up_rounded,
+                  label: '前进',
+                  active: _activeDirection == _DriveDirection.forward,
+                  onDown: () => _startHold(_DriveDirection.forward),
+                  onUp: _stopHold,
+                ),
+                _DriveButton(
+                  icon: Icons.rotate_right_rounded,
+                  label: '右转',
+                  active: _activeDirection == _DriveDirection.turnRight,
+                  onDown: () => _startHold(_DriveDirection.turnRight),
+                  onUp: _stopHold,
+                ),
+                _DriveButton(
+                  icon: Icons.keyboard_arrow_left_rounded,
+                  label: '左移',
+                  active: _activeDirection == _DriveDirection.left,
+                  onDown: () => _startHold(_DriveDirection.left),
+                  onUp: _stopHold,
+                ),
+                _StopButton(onPressed: () => _stopHold()),
+                _DriveButton(
+                  icon: Icons.keyboard_arrow_right_rounded,
+                  label: '右移',
+                  active: _activeDirection == _DriveDirection.right,
+                  onDown: () => _startHold(_DriveDirection.right),
+                  onUp: _stopHold,
+                ),
+                const SizedBox.shrink(),
+                _DriveButton(
+                  icon: Icons.keyboard_arrow_down_rounded,
+                  label: '后退',
+                  active: _activeDirection == _DriveDirection.backward,
+                  onDown: () => _startHold(_DriveDirection.backward),
+                  onUp: _stopHold,
+                ),
+                const SizedBox.shrink(),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+          _TeleopSlider(
+            label: '倍率',
+            value: widget.speedMultiplier,
+            min: 0.1,
+            max: 1.0,
+            divisions: 9,
+            valueText: '${(widget.speedMultiplier * 100).round()}%',
+            onChanged: widget.onSpeedChanged,
+          ),
+          const SizedBox(height: 10),
+          _VelocityReadout(
+            linearX: velocity.linearX,
+            linearY: velocity.linearY,
+            angular: velocity.angular,
+          ),
+          if (widget.data.motionItems.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            _MotionActions(data: widget.data),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _TeleopStatusBar extends StatelessWidget {
+  final bool motionRunning;
+  final _DriveDirection? activeDirection;
+
+  const _TeleopStatusBar({
+    required this.motionRunning,
+    required this.activeDirection,
   });
 
   @override
   Widget build(BuildContext context) {
-    return ConsoleCard(
-      title: '遥控',
-      icon: Icons.gamepad_outlined,
-      child: Column(
+    final status = motionRunning ? 'MOTION ON' : 'MOTION OFF';
+    final color = motionRunning ? AppTheme.success : AppTheme.slate500;
+    final direction = switch (activeDirection) {
+      _DriveDirection.forward => '前进',
+      _DriveDirection.backward => '后退',
+      _DriveDirection.left => '左移',
+      _DriveDirection.right => '右移',
+      _DriveDirection.turnLeft => '左转',
+      _DriveDirection.turnRight => '右转',
+      null => '待命',
+    };
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: AppTheme.subtleFill(context).withValues(alpha: 0.72),
+        border: Border.all(color: AppTheme.borderColor(context)),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
         children: [
-          Center(
-            child: JoystickWidget(
-              size: 136,
-              baseColor: AppTheme.primaryColor.withValues(alpha: 0.08),
-              onMove: (x, y) {
-                // 左摇杆：线速度（y 轴），角速度（x 轴）
-                wsManager.sendCmdVel(
-                  -y * speedMultiplier * 1.0, // linear_x
-                  -x * speedMultiplier * 1.5, // angular_z
-                );
-              },
-              onRelease: wsManager.sendStop,
+          Container(
+            width: 7,
+            height: 7,
+            decoration: BoxDecoration(shape: BoxShape.circle, color: color),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              status,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                fontFamily: 'monospace',
+                color: color,
+                fontWeight: FontWeight.w700,
+              ),
             ),
           ),
-          if (data.motionItems.isNotEmpty) ...[
-            const SizedBox(height: 12),
-            _MotionActions(data: data),
-          ],
+          Text(direction, style: Theme.of(context).textTheme.bodySmall),
+        ],
+      ),
+    );
+  }
+}
+
+class _DriveButton extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final bool active;
+  final VoidCallback onDown;
+  final VoidCallback onUp;
+
+  const _DriveButton({
+    required this.icon,
+    required this.label,
+    required this.active,
+    required this.onDown,
+    required this.onUp,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final color = active ? AppTheme.primaryColor : AppTheme.mutedText(context);
+    return Tooltip(
+      message: label,
+      child: GestureDetector(
+        onTapDown: (_) => onDown(),
+        onTapUp: (_) => onUp(),
+        onTapCancel: onUp,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 120),
+          decoration: BoxDecoration(
+            color: active
+                ? AppTheme.primaryColor.withValues(alpha: 0.18)
+                : AppTheme.subtleFill(context).withValues(alpha: 0.72),
+            border: Border.all(
+              color: active
+                  ? AppTheme.primaryColor.withValues(alpha: 0.65)
+                  : AppTheme.borderColor(context),
+            ),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Icon(icon, size: 28, color: color),
+        ),
+      ),
+    );
+  }
+}
+
+class _StopButton extends StatelessWidget {
+  final VoidCallback onPressed;
+
+  const _StopButton({required this.onPressed});
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: '停止',
+      child: IconButton.filledTonal(
+        onPressed: onPressed,
+        style: IconButton.styleFrom(
+          backgroundColor: AppTheme.danger.withValues(alpha: 0.12),
+          foregroundColor: AppTheme.danger,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        ),
+        icon: const Icon(Icons.stop_circle_outlined, size: 24),
+      ),
+    );
+  }
+}
+
+class _TeleopSlider extends StatelessWidget {
+  final String label;
+  final double value;
+  final double min;
+  final double max;
+  final int divisions;
+  final String valueText;
+  final ValueChanged<double> onChanged;
+
+  const _TeleopSlider({
+    required this.label,
+    required this.value,
+    required this.min,
+    required this.max,
+    required this.divisions,
+    required this.valueText,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        SizedBox(
+          width: 38,
+          child: Text(
+            label,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: AppTheme.primaryColor,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+        Expanded(
+          child: Slider(
+            value: value,
+            min: min,
+            max: max,
+            divisions: divisions,
+            label: valueText,
+            onChanged: onChanged,
+          ),
+        ),
+        SizedBox(
+          width: 42,
+          child: Text(
+            valueText,
+            textAlign: TextAlign.right,
+            style: Theme.of(
+              context,
+            ).textTheme.bodySmall?.copyWith(fontFamily: 'monospace'),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _VelocityReadout extends StatelessWidget {
+  final double linearX;
+  final double linearY;
+  final double angular;
+
+  const _VelocityReadout({
+    required this.linearX,
+    required this.linearY,
+    required this.angular,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: AppTheme.subtleFill(context).withValues(alpha: 0.72),
+        border: Border.all(color: AppTheme.borderColor(context)),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              'X ${linearX.toStringAsFixed(2)}',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                fontFamily: 'monospace',
+                color: AppTheme.mutedText(context),
+              ),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              'Y ${linearY.toStringAsFixed(2)}',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                fontFamily: 'monospace',
+                color: AppTheme.mutedText(context),
+              ),
+            ),
+          ),
+          Text(
+            'W ${angular.toStringAsFixed(2)}',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              fontFamily: 'monospace',
+              color: AppTheme.mutedText(context),
+            ),
+          ),
         ],
       ),
     );

@@ -180,9 +180,14 @@ class WsConnectionManager {
   }
 
   /// 发送速度指令，带 100ms 冷却防抖
-  void sendCmdVel(double linearX, double angularZ, {double linearY = 0}) {
+  void sendCmdVel(
+    double linearX,
+    double angularZ, {
+    double linearY = 0,
+    bool force = false,
+  }) {
     final now = DateTime.now();
-    if (now.difference(_lastCmdVel) < _cmdVelCooldown) return;
+    if (!force && now.difference(_lastCmdVel) < _cmdVelCooldown) return;
     _lastCmdVel = now;
     final channel = _controlChannel;
     if (channel == null) return;
@@ -200,7 +205,7 @@ class WsConnectionManager {
     } catch (_) {}
   }
 
-  void sendStop() => sendCmdVel(0, 0);
+  void sendStop() => sendCmdVel(0, 0, force: true);
 
   void dispose() {
     disconnect();
