@@ -12,9 +12,7 @@ class LogsRepository {
     if (data == null) return [];
     final map = data as Map<String, dynamic>;
     final list = map['items'] as List<dynamic>? ?? [];
-    return list
-        .map((e) => LogFileInfo.fromJson(e as Map<String, dynamic>))
-        .toList();
+    return list.map((e) => LogFileInfo.fromJson(_normalizeLogFile(e))).toList();
   }
 
   /// GET /logs/{filename} → {filename, content}
@@ -32,6 +30,17 @@ class LogsRepository {
 
   /// POST /logs/actions/cleanup
   Future<void> cleanup() async {
-    await _client.post('/logs/actions/cleanup');
+    try {
+      await _client.post('/logs/cleanup');
+    } catch (_) {
+      await _client.post('/logs/actions/cleanup');
+    }
+  }
+
+  Map<String, dynamic> _normalizeLogFile(dynamic raw) {
+    final json = Map<String, dynamic>.from(raw as Map);
+    json['name'] ??= json['filename'];
+    json['mod_time'] ??= json['last_modified'];
+    return json;
   }
 }

@@ -100,33 +100,42 @@ class ConsoleCard extends StatelessWidget {
               ),
             ],
           ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (title != null)
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(14, 12, 14, 10),
-                  child: Row(
-                    children: [
-                      if (icon != null) ...[
-                        Icon(icon, size: 16, color: AppTheme.primaryColor),
-                        const SizedBox(width: 8),
-                      ],
-                      Expanded(
-                        child: Text(
-                          title!.toUpperCase(),
-                          style: Theme.of(context).textTheme.titleSmall,
-                        ),
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final content = Padding(padding: padding, child: child);
+              final hasBoundedHeight = constraints.hasBoundedHeight;
+
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: hasBoundedHeight
+                    ? MainAxisSize.max
+                    : MainAxisSize.min,
+                children: [
+                  if (title != null)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(14, 12, 14, 10),
+                      child: Row(
+                        children: [
+                          if (icon != null) ...[
+                            Icon(icon, size: 16, color: AppTheme.primaryColor),
+                            const SizedBox(width: 8),
+                          ],
+                          Expanded(
+                            child: Text(
+                              title!.toUpperCase(),
+                              style: Theme.of(context).textTheme.titleSmall,
+                            ),
+                          ),
+                          ?trailing,
+                        ],
                       ),
-                      ?trailing,
-                    ],
-                  ),
-                ),
-              if (title != null)
-                Divider(height: 1, color: AppTheme.borderColor(context)),
-              Padding(padding: padding, child: child),
-            ],
+                    ),
+                  if (title != null)
+                    Divider(height: 1, color: AppTheme.borderColor(context)),
+                  if (hasBoundedHeight) Expanded(child: content) else content,
+                ],
+              );
+            },
           ),
         ),
       ),

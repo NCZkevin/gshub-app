@@ -81,11 +81,24 @@ class LogsNotifier extends AutoDisposeAsyncNotifier<LogsState> {
   Future<void> selectFile(String filename) async {
     final current = state.value ?? const LogsState();
     state = AsyncValue.data(
-      current.copyWith(selected: filename, contentLoading: true, clearContent: true),
+      current.copyWith(
+        selected: filename,
+        contentLoading: true,
+        clearContent: true,
+      ),
     );
 
     final repo = await ref.read(logsRepositoryProvider.future);
-    if (repo == null) return;
+    if (repo == null) {
+      state = AsyncValue.data(
+        current.copyWith(
+          contentLoading: false,
+          error: '未连接机器人',
+          clearContent: true,
+        ),
+      );
+      return;
+    }
 
     try {
       final content = await repo.fetchContent(filename);
@@ -106,7 +119,12 @@ class LogsNotifier extends AutoDisposeAsyncNotifier<LogsState> {
     state = AsyncValue.data(current.copyWith(loading: true, clearError: true));
 
     final repo = await ref.read(logsRepositoryProvider.future);
-    if (repo == null) return;
+    if (repo == null) {
+      state = AsyncValue.data(
+        current.copyWith(loading: false, error: '未连接机器人'),
+      );
+      return;
+    }
 
     try {
       await repo.deleteLog(filename);
@@ -132,14 +150,17 @@ class LogsNotifier extends AutoDisposeAsyncNotifier<LogsState> {
     state = AsyncValue.data(current.copyWith(loading: true, clearError: true));
 
     final repo = await ref.read(logsRepositoryProvider.future);
-    if (repo == null) return;
+    if (repo == null) {
+      state = AsyncValue.data(
+        current.copyWith(loading: false, error: '未连接机器人'),
+      );
+      return;
+    }
 
     try {
       await repo.cleanup();
       final files = await repo.fetchList();
-      state = AsyncValue.data(
-        LogsState(files: files),
-      );
+      state = AsyncValue.data(LogsState(files: files));
     } catch (e) {
       state = AsyncValue.data(
         current.copyWith(loading: false, error: e.toString()),
@@ -151,9 +172,54 @@ class LogsNotifier extends AutoDisposeAsyncNotifier<LogsState> {
     final current = state.value ?? const LogsState();
     state = AsyncValue.data(current.copyWith(searchQuery: query));
   }
+
+  Future<void> refreshList() async {
+    final current = state.value ?? const LogsState();
+    state = AsyncValue.data(current.copyWith(loading: true, clearError: true));
+
+    final repo = await ref.read(logsRepositoryProvider.future);
+    if (repo == null) {
+      state = AsyncValue.data(
+        current.copyWith(loading: false, error: '未连接机器人'),
+      );
+      return;
+    }
+
+    try {
+      final files = await repo.fetchList();
+      final selectedStillExists =
+          current.selected == null ||
+          files.any((file) => file.name == current.selected);
+      state = AsyncValue.data(
+        current.copyWith(
+          files: files,
+          loading: false,
+          clearSelected: !selectedStillExists,
+          clearContent: !selectedStillExists,
+        ),
+      );
+    } catch (e) {
+      state = AsyncValue.data(
+        current.copyWith(loading: false, error: e.toString()),
+      );
+    }
+  }
+
+  Future<void> refreshSelected() async {
+    final current = state.value ?? const LogsState();
+    final selected = current.selected;
+    if (selected == null) return;
+    await selectFile(selected);
+  }
+
+  void clearSelection() {
+    final current = state.value ?? const LogsState();
+    state = AsyncValue.data(
+      current.copyWith(clearSelected: true, clearContent: true),
+    );
+  }
 }
 
-final logsProvider =
-    AsyncNotifierProvider.autoDispose<LogsNotifier, LogsState>(
+final logsProvider = AsyncNotifierProvider.autoDispose<LogsNotifier, LogsState>(
   LogsNotifier.new,
 );
