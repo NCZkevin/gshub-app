@@ -31,10 +31,7 @@ class ConnectionState {
   final List<RobotConnection> connections;
   final String? activeId;
 
-  const ConnectionState({
-    required this.connections,
-    required this.activeId,
-  });
+  const ConnectionState({required this.connections, required this.activeId});
 
   RobotConnection? get active =>
       connections.where((c) => c.id == activeId).firstOrNull;
@@ -42,11 +39,10 @@ class ConnectionState {
   ConnectionState copyWith({
     List<RobotConnection>? connections,
     String? activeId,
-  }) =>
-      ConnectionState(
-        connections: connections ?? this.connections,
-        activeId: activeId ?? this.activeId,
-      );
+  }) => ConnectionState(
+    connections: connections ?? this.connections,
+    activeId: activeId ?? this.activeId,
+  );
 }
 
 class ConnectionNotifier extends Notifier<ConnectionState> {
@@ -117,8 +113,8 @@ class ConnectionNotifier extends Notifier<ConnectionState> {
 
 final connectionProvider =
     NotifierProvider<ConnectionNotifier, ConnectionState>(
-  ConnectionNotifier.new,
-);
+      ConnectionNotifier.new,
+    );
 
 // ─── Active Connection Derived Providers ─────────────────────
 
@@ -146,7 +142,14 @@ final wsManagerProvider = Provider<WsConnectionManager>((ref) {
     final wsUrl = conn.baseUrl
         .replaceFirst('http://', 'ws://')
         .replaceFirst('https://', 'wss://');
-    manager.connect(wsUrl);
+    final uri = Uri.parse(conn.baseUrl);
+    final controlScheme = uri.scheme == 'https' ? 'wss' : 'ws';
+    final controlWsUrl = Uri(
+      scheme: controlScheme,
+      host: uri.host,
+      port: 9099,
+    ).toString();
+    manager.connect(odometryWsBaseUrl: wsUrl, controlWsUrl: controlWsUrl);
   }
   ref.onDispose(manager.dispose);
   return manager;

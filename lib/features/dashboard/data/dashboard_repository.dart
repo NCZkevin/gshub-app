@@ -47,12 +47,31 @@ class DashboardRepository {
   }
 
   /// POST /services/motion/start
-  Future<void> startMotion(String adapterType) =>
-      _client.post('/services/motion/start',
-          data: {'adapter_type': adapterType});
+  Future<void> startMotion(String adapterType) => _client.post(
+    '/services/motion/start',
+    data: {'adapter_type': adapterType},
+  );
 
   /// POST /services/motion/stop
   Future<void> stopMotion() => _client.post('/services/motion/stop');
+
+  /// GET /services/scan/status
+  Future<Map<String, dynamic>?> fetchScanStatus() async {
+    final data = await _client.get('/services/scan/status');
+    return data as Map<String, dynamic>?;
+  }
+
+  /// POST /services/scan/start
+  Future<void> startScan() => _client.post('/services/scan/start');
+
+  /// POST /services/scan/stop
+  Future<void> stopScan() => _client.post('/services/scan/stop');
+
+  /// POST /services/semantic/start
+  Future<void> startSemantic() => _client.post('/services/semantic/start');
+
+  /// POST /services/semantic/stop
+  Future<void> stopSemantic() => _client.post('/services/semantic/stop');
 
   /// GET /services/motion/adapters → {enabled_adapter_types: [...]}
   Future<List<String>> fetchMotionAdapters() async {
@@ -63,4 +82,21 @@ class DashboardRepository {
     if (list == null) return [];
     return (list as List<dynamic>).map((e) => e.toString()).toList();
   }
+
+  /// GET /services/motion/system_info
+  Future<List<Map<String, dynamic>>> fetchMotionItems() async {
+    final data = await _client.get('/services/motion/system_info');
+    if (data == null) return [];
+    final map = data as Map<String, dynamic>;
+    final systemInfo = map['system_info'];
+    if (systemInfo is! Map<String, dynamic>) return [];
+    final motions = systemInfo['motions'];
+    if (motions is! List) return [];
+    return motions.whereType<Map<String, dynamic>>().toList(growable: false);
+  }
+
+  /// POST /services/motion/trigger?motion_id=...
+  Future<void> triggerMotion(String motionId) => _client.post(
+    '/services/motion/trigger?motion_id=${Uri.encodeComponent(motionId)}',
+  );
 }

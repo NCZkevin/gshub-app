@@ -14,17 +14,18 @@ class RobotOdometry {
   });
 
   factory RobotOdometry.fromJson(Map<String, dynamic> json) => RobotOdometry(
-        x: (json['x'] as num).toDouble(),
-        y: (json['y'] as num).toDouble(),
-        heading: (json['heading'] as num).toDouble(),
-      );
+    x: (json['x'] as num).toDouble(),
+    y: (json['y'] as num).toDouble(),
+    heading: (json['heading'] as num).toDouble(),
+  );
 }
 
 /// 统一管理所有 WebSocket 连接
 /// - 里程计（odometryStream）
 /// - 机器人控制（sendCmdVel）
 class WsConnectionManager {
-  String _wsBaseUrl = '';
+  String _odometryWsBaseUrl = '';
+  String _controlWsUrl = '';
   bool _active = false;
 
   // Version counters prevent stale reconnect callbacks from firing
@@ -49,9 +50,13 @@ class WsConnectionManager {
   Duration _backoff(int retry) =>
       Duration(seconds: (2 << retry.clamp(0, 4)).clamp(2, 30));
 
-  void connect(String wsBaseUrl) {
+  void connect({
+    required String odometryWsBaseUrl,
+    required String controlWsUrl,
+  }) {
     disconnect();
-    _wsBaseUrl = wsBaseUrl;
+    _odometryWsBaseUrl = odometryWsBaseUrl;
+    _controlWsUrl = controlWsUrl;
     _active = true;
     _odometryRetry = 0;
     _controlRetry = 0;
@@ -83,7 +88,7 @@ class WsConnectionManager {
     _odometryChannel?.sink.close();
     _odometryChannel = null;
 
-    final uri = Uri.parse('$_wsBaseUrl/tower/odometry/robot_odometry');
+    final uri = Uri.parse('$_odometryWsBaseUrl/tower/odometry/robot_odometry');
     final channel = WebSocketChannel.connect(uri);
     _odometryChannel = channel;
 
@@ -120,8 +125,7 @@ class WsConnectionManager {
       onDone: () {
         if (_active && gen == _odometryGen) {
           _odometryRetry++;
-          Future.delayed(_backoff(_odometryRetry),
-              () => _connectOdometry(gen));
+          Future.delayed(_backoff(_odometryRetry), () => _connectOdometry(gen));
         }
       },
       onError: (e) {
@@ -139,7 +143,7 @@ class WsConnectionManager {
     _controlChannel?.sink.close();
     _controlChannel = null;
 
-    final uri = Uri.parse('$_wsBaseUrl/tower/control/cmd_vel');
+    final uri = Uri.parse(_controlWsUrl);
     final channel = WebSocketChannel.connect(uri);
     _controlChannel = channel;
 
@@ -167,8 +171,7 @@ class WsConnectionManager {
       onDone: () {
         if (_active && gen == _controlGen) {
           _controlRetry++;
-          Future.delayed(
-              _backoff(_controlRetry), () => _connectControl(gen));
+          Future.delayed(_backoff(_controlRetry), () => _connectControl(gen));
         }
       },
       onError: (e) {},
@@ -177,17 +180,23 @@ class WsConnectionManager {
   }
 
   /// 发送速度指令，带 100ms 冷却防抖
-  void sendCmdVel(double linearX, double angularZ) {
+  void sendCmdVel(double linearX, double angularZ, {double linearY = 0}) {
     final now = DateTime.now();
     if (now.difference(_lastCmdVel) < _cmdVelCooldown) return;
     _lastCmdVel = now;
     final channel = _controlChannel;
     if (channel == null) return;
     try {
-      channel.sink.add(jsonEncode({
-        'linear_x': linearX,
-        'angular_z': angularZ,
-      }));
+      channel.sink.add(
+        jsonEncode({
+          'linear_x': linearX,
+          'linear_y': linearY,
+          'linear_z': 0,
+          'angular_x': 0,
+          'angular_y': 0,
+          'angular_z': angularZ,
+        }),
+      );
     } catch (_) {}
   }
 
