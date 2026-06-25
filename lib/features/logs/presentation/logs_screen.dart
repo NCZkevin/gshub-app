@@ -462,10 +462,27 @@ class _LogLine {
   });
 }
 
+class _LogDisplaySlice {
+  final String text;
+  final bool truncated;
+  final String? reason;
+
+  const _LogDisplaySlice({
+    required this.text,
+    required this.truncated,
+    this.reason,
+  });
+}
+
 class _LogViewerState extends State<_LogViewer> {
+  static const _maxRenderedLines = 20000;
+  static const _maxRenderedChars = 2 * 1024 * 1024;
+
   final _scrollController = ScrollController();
   final _contentSearchController = TextEditingController();
-  String? _cachedContent;
+  String? _cachedSliceSource;
+  _LogDisplaySlice? _cachedSlice;
+  String? _cachedLinesSource;
   List<_LogLine> _cachedLines = const [];
   _LogFilter _levelFilter = _LogFilter.all;
   String _searchQuery = '';
@@ -506,7 +523,8 @@ class _LogViewerState extends State<_LogViewer> {
 
   @override
   Widget build(BuildContext context) {
-    final lines = _buildLines(widget.content);
+    final slice = _displaySlice(widget.content);
+    final lines = _buildLines(slice.text);
     final filtered = _filterLines(lines);
     final matches = _matchingLinePositions(filtered);
     final clampedMatch = matches.isEmpty
@@ -618,20 +636,68 @@ class _LogViewerState extends State<_LogViewer> {
           matchCount: matches.length,
           levelFilter: _levelFilter,
           followMode: _followMode,
+          truncated: slice.truncated,
+          truncatedReason: slice.reason,
         ),
       ],
     );
   }
 
-  List<_LogLine> _buildLines(String content) {
-    if (_cachedContent == content) return _cachedLines;
+  _LogDisplaySlice _displaySlice(String content) {
+    if (_cachedSliceSource == content && _cachedSlice != null) {
+      return _cachedSlice!;
+    }
     if (content.isEmpty) {
-      _cachedContent = content;
+      _cachedSliceSource = content;
+      _cachedSlice = const _LogDisplaySlice(text: '', truncated: false);
+      return _cachedSlice!;
+    }
+
+    var start = 0;
+    var linesSeen = 0;
+    for (var i = content.length - 1; i >= 0; i--) {
+      if (content.codeUnitAt(i) == 0x0A) {
+        linesSeen++;
+        if (linesSeen >= _maxRenderedLines) {
+          start = i + 1;
+          break;
+        }
+      }
+      if (content.length - i > _maxRenderedChars) {
+        start = i;
+        break;
+      }
+    }
+
+    if (content.length - start > _maxRenderedChars) {
+      start = content.length - _maxRenderedChars;
+    }
+    if (start > 0) {
+      final nextNewline = content.indexOf('\n', start);
+      if (nextNewline >= 0 && nextNewline + 1 < content.length) {
+        start = nextNewline + 1;
+      }
+    }
+
+    final truncated = start > 0;
+    _cachedSliceSource = content;
+    _cachedSlice = _LogDisplaySlice(
+      text: truncated ? content.substring(start) : content,
+      truncated: truncated,
+      reason: truncated ? '仅显示尾部最多 $_maxRenderedLines 行 / 2MB' : null,
+    );
+    return _cachedSlice!;
+  }
+
+  List<_LogLine> _buildLines(String content) {
+    if (_cachedLinesSource == content) return _cachedLines;
+    if (content.isEmpty) {
+      _cachedLinesSource = content;
       _cachedLines = const [];
       return _cachedLines;
     }
     final split = content.split('\n');
-    _cachedContent = content;
+    _cachedLinesSource = content;
     _cachedLines = [
       for (var i = 0; i < split.length; i++)
         _LogLine(text: split[i], index: i, level: _levelFor(split[i])),
@@ -923,22 +989,32 @@ class _LogLineRow extends StatelessWidget {
           Expanded(
             child: Padding(
               padding: const EdgeInsets.fromLTRB(8, 2, 4, 2),
-              child: SelectableText.rich(
-                TextSpan(
-                  children: _highlightSpans(
-                    line.text,
-                    searchQuery,
-                    isCurrentMatch,
-                    levelColor,
-                  ),
-                ),
-                style: TextStyle(
-                  color: levelColor,
-                  fontFamily: 'monospace',
-                  fontSize: fontSize,
-                  height: 1.45,
-                ),
-              ),
+              child: searchQuery.isEmpty
+                  ? Text(
+                      line.text.isEmpty ? ' ' : line.text,
+                      style: TextStyle(
+                        color: levelColor,
+                        fontFamily: 'monospace',
+                        fontSize: fontSize,
+                        height: 1.45,
+                      ),
+                    )
+                  : SelectableText.rich(
+                      TextSpan(
+                        children: _highlightSpans(
+                          line.text,
+                          searchQuery,
+                          isCurrentMatch,
+                          levelColor,
+                        ),
+                      ),
+                      style: TextStyle(
+                        color: levelColor,
+                        fontFamily: 'monospace',
+                        fontSize: fontSize,
+                        height: 1.45,
+                      ),
+                    ),
             ),
           ),
         ],
@@ -1005,6 +1081,8 @@ class _ViewerStatusBar extends StatelessWidget {
   final int matchCount;
   final _LogFilter levelFilter;
   final bool followMode;
+  final bool truncated;
+  final String? truncatedReason;
 
   const _ViewerStatusBar({
     required this.totalLines,
@@ -1012,15 +1090,18 @@ class _ViewerStatusBar extends StatelessWidget {
     required this.matchCount,
     required this.levelFilter,
     required this.followMode,
+    required this.truncated,
+    this.truncatedReason,
   });
 
   @override
   Widget build(BuildContext context) {
     final items = [
-      '共 $totalLines 行',
+      truncated ? '预览 $totalLines 行' : '共 $totalLines 行',
       if (levelFilter != _LogFilter.all) '过滤后 $filteredLines 行',
       if (matchCount > 0) '$matchCount 处匹配',
       if (followMode) '跟随中',
+      ?truncatedReason,
     ];
 
     return Container(
