@@ -83,6 +83,7 @@ _$MapInfoImpl _$$MapInfoImplFromJson(Map<String, dynamic> json) =>
       size: (json['size'] as num?)?.toInt() ?? 0,
       fileCount: (json['file_count'] as num?)?.toInt() ?? 0,
       resolution: (json['resolution'] as num?)?.toDouble() ?? 0.05,
+      origin: _originFromJson(json['origin']),
       createdTime: (json['created_time'] as num?)?.toDouble(),
       modifiedTime: (json['modified_time'] as num?)?.toDouble(),
     );
@@ -94,6 +95,7 @@ Map<String, dynamic> _$$MapInfoImplToJson(_$MapInfoImpl instance) =>
       'size': instance.size,
       'file_count': instance.fileCount,
       'resolution': instance.resolution,
+      'origin': instance.origin,
       'created_time': instance.createdTime,
       'modified_time': instance.modifiedTime,
     };

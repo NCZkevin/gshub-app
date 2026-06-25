@@ -147,6 +147,7 @@ class MapInfo with _$MapInfo {
     @Default(0) int size,
     @JsonKey(name: 'file_count') @Default(0) int fileCount,
     @JsonKey(name: 'resolution') @Default(0.05) double resolution,
+    @JsonKey(name: 'origin', fromJson: _originFromJson) List<double>? origin,
     // stored as epoch seconds
     @JsonKey(name: 'created_time') double? createdTime,
     @JsonKey(name: 'modified_time') double? modifiedTime,
@@ -154,6 +155,12 @@ class MapInfo with _$MapInfo {
 
   factory MapInfo.fromJson(Map<String, dynamic> json) =>
       _$MapInfoFromJson(json);
+}
+
+List<double>? _originFromJson(Object? value) {
+  if (value is! List) return null;
+  final parsed = value.whereType<num>().map((item) => item.toDouble()).toList();
+  return parsed.length >= 2 ? parsed : null;
 }
 
 @freezed

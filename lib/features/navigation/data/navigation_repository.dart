@@ -41,8 +41,9 @@ class NavigationRepository {
             files.isNotEmpty ? files.first : const FileInfo(name: '', path: ''),
       );
       if (pgmFile.name.isEmpty) return null;
-      final bytes =
-          await _client.getBytes('/maps/$mapName/files/${pgmFile.path}');
+      final bytes = await _client.getBytes(
+        '/maps/$mapName/files/${pgmFile.path}',
+      );
       return Uint8List.fromList(bytes);
     } catch (_) {
       return null;
@@ -59,12 +60,13 @@ class NavigationRepository {
   }
 
   /// POST /nav/container/start
-  Future<void> startNavContainer(String sceneName,
-          {bool relocalization = false}) =>
-      _client.post('/nav/container/start', data: {
-        'scene_name': sceneName,
-        'use_relocalization': relocalization,
-      });
+  Future<void> startNavContainer(
+    String sceneName, {
+    bool relocalization = false,
+  }) => _client.post(
+    '/nav/container/start',
+    data: {'scene_name': sceneName, 'use_relocalization': relocalization},
+  );
 
   /// POST /nav/container/stop (async)
   Future<void> stopNavContainer() => _client.post('/nav/container/stop');
@@ -80,21 +82,109 @@ class NavigationRepository {
 
   // ─── 导航控制 ─────────────────────────────────────────────────
 
-  Future<void> startNavigateTo(double x, double y, double theta) =>
-      _client.post('/nav/start_navigation',
-          data: {'x': x, 'y': y, 'theta': theta});
+  Future<Map<String, dynamic>> createMission(
+    Map<String, dynamic> request,
+  ) async {
+    final data = await _client.post('/nav/missions', data: request);
+    if (data == null) return {};
+    return data as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> fetchMission(String missionId) async {
+    final data = await _client.get('/nav/missions/$missionId');
+    if (data == null) return {};
+    return data as Map<String, dynamic>;
+  }
+
+  Future<void> cancelMission(String missionId) =>
+      _client.delete('/nav/missions/$missionId');
+
+  Future<void> startNavigateTo(double x, double y, double theta) => _client
+      .post('/nav/start_navigation', data: {'x': x, 'y': y, 'theta': theta});
 
   Future<void> startPathNavigation(List<Waypoint> waypoints, int cycles) =>
-      _client.post('/nav/start_path_navigation', data: {
-        'waypoints': waypoints
-            .map((w) => {'x': w.x, 'y': w.y, 'theta': w.theta})
-            .toList(),
-        'cycles': cycles,
-      });
+      _client.post(
+        '/nav/start_path_navigation',
+        data: {
+          'waypoints': waypoints
+              .map((w) => {'x': w.x, 'y': w.y, 'theta': w.theta})
+              .toList(),
+          'cycles': cycles,
+        },
+      );
 
   Future<void> stopNavigating() => _client.post('/nav/stop_navigation');
   Future<void> pauseNav() => _client.post('/nav/pause_navigation');
   Future<void> resumeNav() => _client.post('/nav/resume_navigation');
+
+  Future<Map<String, dynamic>> getSavedNavParams(List<String> names) async {
+    final data = await _client.post(
+      '/nav/get_saved_nav_params',
+      data: {'names': names},
+    );
+    if (data == null) return {};
+    return data as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> getNavParams(List<String> names) async {
+    final data = await _client.post(
+      '/nav/get_nav_params',
+      data: {'names': names},
+    );
+    if (data == null) return {};
+    return data as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> setNavParams(Map<String, dynamic> params) async {
+    final data = await _client.post('/nav/set_nav_params', data: params);
+    if (data == null) return {};
+    return data as Map<String, dynamic>;
+  }
+
+  Future<List<Map<String, dynamic>>> fetchLandmarks(String sceneName) async {
+    final data = await _client.get(
+      '/nav/landmarks',
+      queryParameters: {'scene_name': sceneName},
+    );
+    if (data == null) return [];
+    if (data is List) {
+      return data.cast<Map<String, dynamic>>();
+    }
+    final map = data as Map<String, dynamic>;
+    final list = map['items'] ?? map['landmarks'] ?? [];
+    if (list is! List) return [];
+    return list.cast<Map<String, dynamic>>();
+  }
+
+  Future<Map<String, dynamic>> saveLandmark({
+    required String name,
+    required String sceneName,
+    required String kind,
+    required List<Waypoint> points,
+  }) async {
+    final data = await _client.post(
+      '/nav/landmarks',
+      data: {
+        'name': name,
+        'scene_name': sceneName,
+        'kind': kind,
+        'points': points
+            .map((point) => {'x': point.x, 'y': point.y, 'theta': point.theta})
+            .toList(),
+      },
+    );
+    if (data == null) return {};
+    return data as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> startLandmark(int id, int cycles) async {
+    final data = await _client.post(
+      '/nav/landmarks/$id/start',
+      data: {'cycles': cycles},
+    );
+    if (data == null) return {};
+    return data as Map<String, dynamic>;
+  }
 
   // ─── 规划路径 ─────────────────────────────────────────────────
 
@@ -111,6 +201,12 @@ class NavigationRepository {
   }
 
   // ─── 重定位 ───────────────────────────────────────────────────
+
+  Future<void> setRelocalizationPose(double x, double y, double theta) =>
+      _client.post(
+        '/nav/set_relocalization_pose',
+        data: {'x': x, 'y': y, 'theta': theta},
+      );
 
   Future<void> toggleRelocalization(bool enable) =>
       _client.post('/nav/relocalization_toggle', data: {'enable': enable});

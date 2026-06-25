@@ -1190,7 +1190,9 @@ mixin _$MapInfo {
   @JsonKey(name: 'file_count')
   int get fileCount => throw _privateConstructorUsedError;
   @JsonKey(name: 'resolution')
-  double get resolution => throw _privateConstructorUsedError; // stored as epoch seconds
+  double get resolution => throw _privateConstructorUsedError;
+  @JsonKey(name: 'origin', fromJson: _originFromJson)
+  List<double>? get origin => throw _privateConstructorUsedError; // stored as epoch seconds
   @JsonKey(name: 'created_time')
   double? get createdTime => throw _privateConstructorUsedError;
   @JsonKey(name: 'modified_time')
@@ -1216,6 +1218,7 @@ abstract class $MapInfoCopyWith<$Res> {
     int size,
     @JsonKey(name: 'file_count') int fileCount,
     @JsonKey(name: 'resolution') double resolution,
+    @JsonKey(name: 'origin', fromJson: _originFromJson) List<double>? origin,
     @JsonKey(name: 'created_time') double? createdTime,
     @JsonKey(name: 'modified_time') double? modifiedTime,
   });
@@ -1241,6 +1244,7 @@ class _$MapInfoCopyWithImpl<$Res, $Val extends MapInfo>
     Object? size = null,
     Object? fileCount = null,
     Object? resolution = null,
+    Object? origin = freezed,
     Object? createdTime = freezed,
     Object? modifiedTime = freezed,
   }) {
@@ -1266,6 +1270,10 @@ class _$MapInfoCopyWithImpl<$Res, $Val extends MapInfo>
                 ? _value.resolution
                 : resolution // ignore: cast_nullable_to_non_nullable
                       as double,
+            origin: freezed == origin
+                ? _value.origin
+                : origin // ignore: cast_nullable_to_non_nullable
+                      as List<double>?,
             createdTime: freezed == createdTime
                 ? _value.createdTime
                 : createdTime // ignore: cast_nullable_to_non_nullable
@@ -1294,6 +1302,7 @@ abstract class _$$MapInfoImplCopyWith<$Res> implements $MapInfoCopyWith<$Res> {
     int size,
     @JsonKey(name: 'file_count') int fileCount,
     @JsonKey(name: 'resolution') double resolution,
+    @JsonKey(name: 'origin', fromJson: _originFromJson) List<double>? origin,
     @JsonKey(name: 'created_time') double? createdTime,
     @JsonKey(name: 'modified_time') double? modifiedTime,
   });
@@ -1318,6 +1327,7 @@ class __$$MapInfoImplCopyWithImpl<$Res>
     Object? size = null,
     Object? fileCount = null,
     Object? resolution = null,
+    Object? origin = freezed,
     Object? createdTime = freezed,
     Object? modifiedTime = freezed,
   }) {
@@ -1343,6 +1353,10 @@ class __$$MapInfoImplCopyWithImpl<$Res>
             ? _value.resolution
             : resolution // ignore: cast_nullable_to_non_nullable
                   as double,
+        origin: freezed == origin
+            ? _value._origin
+            : origin // ignore: cast_nullable_to_non_nullable
+                  as List<double>?,
         createdTime: freezed == createdTime
             ? _value.createdTime
             : createdTime // ignore: cast_nullable_to_non_nullable
@@ -1365,9 +1379,11 @@ class _$MapInfoImpl implements _MapInfo {
     this.size = 0,
     @JsonKey(name: 'file_count') this.fileCount = 0,
     @JsonKey(name: 'resolution') this.resolution = 0.05,
+    @JsonKey(name: 'origin', fromJson: _originFromJson)
+    final List<double>? origin,
     @JsonKey(name: 'created_time') this.createdTime,
     @JsonKey(name: 'modified_time') this.modifiedTime,
-  });
+  }) : _origin = origin;
 
   factory _$MapInfoImpl.fromJson(Map<String, dynamic> json) =>
       _$$MapInfoImplFromJson(json);
@@ -1385,6 +1401,17 @@ class _$MapInfoImpl implements _MapInfo {
   @override
   @JsonKey(name: 'resolution')
   final double resolution;
+  final List<double>? _origin;
+  @override
+  @JsonKey(name: 'origin', fromJson: _originFromJson)
+  List<double>? get origin {
+    final value = _origin;
+    if (value == null) return null;
+    if (_origin is EqualUnmodifiableListView) return _origin;
+    // ignore: implicit_dynamic_type
+    return EqualUnmodifiableListView(value);
+  }
+
   // stored as epoch seconds
   @override
   @JsonKey(name: 'created_time')
@@ -1395,7 +1422,7 @@ class _$MapInfoImpl implements _MapInfo {
 
   @override
   String toString() {
-    return 'MapInfo(name: $name, path: $path, size: $size, fileCount: $fileCount, resolution: $resolution, createdTime: $createdTime, modifiedTime: $modifiedTime)';
+    return 'MapInfo(name: $name, path: $path, size: $size, fileCount: $fileCount, resolution: $resolution, origin: $origin, createdTime: $createdTime, modifiedTime: $modifiedTime)';
   }
 
   @override
@@ -1410,6 +1437,7 @@ class _$MapInfoImpl implements _MapInfo {
                 other.fileCount == fileCount) &&
             (identical(other.resolution, resolution) ||
                 other.resolution == resolution) &&
+            const DeepCollectionEquality().equals(other._origin, _origin) &&
             (identical(other.createdTime, createdTime) ||
                 other.createdTime == createdTime) &&
             (identical(other.modifiedTime, modifiedTime) ||
@@ -1425,6 +1453,7 @@ class _$MapInfoImpl implements _MapInfo {
     size,
     fileCount,
     resolution,
+    const DeepCollectionEquality().hash(_origin),
     createdTime,
     modifiedTime,
   );
@@ -1450,6 +1479,8 @@ abstract class _MapInfo implements MapInfo {
     final int size,
     @JsonKey(name: 'file_count') final int fileCount,
     @JsonKey(name: 'resolution') final double resolution,
+    @JsonKey(name: 'origin', fromJson: _originFromJson)
+    final List<double>? origin,
     @JsonKey(name: 'created_time') final double? createdTime,
     @JsonKey(name: 'modified_time') final double? modifiedTime,
   }) = _$MapInfoImpl;
@@ -1467,7 +1498,10 @@ abstract class _MapInfo implements MapInfo {
   int get fileCount;
   @override
   @JsonKey(name: 'resolution')
-  double get resolution; // stored as epoch seconds
+  double get resolution;
+  @override
+  @JsonKey(name: 'origin', fromJson: _originFromJson)
+  List<double>? get origin; // stored as epoch seconds
   @override
   @JsonKey(name: 'created_time')
   double? get createdTime;

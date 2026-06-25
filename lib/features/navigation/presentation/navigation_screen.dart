@@ -2,9 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../app/theme.dart';
+import '../../../core/websocket/ws_connection_manager.dart';
+import '../../../features/connection/presentation/connection_provider.dart';
 import '../../../shared/domain/app_models.dart';
 import '../../../shared/widgets/console_widgets.dart';
+import '../../../shared/widgets/joystick_widget.dart';
 import '../../../shared/widgets/occupancy_map.dart';
+import '../../../shared/widgets/point_cloud_viewer.dart';
 import 'navigation_provider.dart';
 
 class NavigationScreen extends ConsumerStatefulWidget {
@@ -18,12 +22,13 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen>
     with SingleTickerProviderStateMixin {
   late TabController _tabController;
   final _cyclesController = TextEditingController(text: '1');
+  final _routeNameController = TextEditingController();
   final _transformationController = TransformationController();
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
+    _tabController = TabController(length: 5, vsync: this);
     _tabController.addListener(_onTabChanged);
   }
 
@@ -31,6 +36,7 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen>
   void dispose() {
     _tabController.dispose();
     _cyclesController.dispose();
+    _routeNameController.dispose();
     _transformationController.dispose();
     super.dispose();
   }
@@ -216,8 +222,267 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen>
               ],
             ),
           ),
+          const SizedBox(height: 12),
+          _buildNavParamsCard(navState),
         ],
       ),
+    );
+  }
+
+  Widget _buildNavParamsCard(NavigationState navState) {
+    final notifier = ref.read(navigationProvider.notifier);
+    return ConsoleCard(
+      title: '导航参数',
+      icon: Icons.tune_outlined,
+      child: DefaultTabController(
+        length: 3,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (navState.navParamsDirty)
+              Container(
+                padding: const EdgeInsets.all(10),
+                margin: const EdgeInsets.only(bottom: 12),
+                decoration: BoxDecoration(
+                  color: AppTheme.warning.withValues(alpha: 0.12),
+                  border: Border.all(
+                    color: AppTheme.warning.withValues(alpha: 0.35),
+                  ),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Text(
+                  '参数有未应用修改，启动导航不会自动保存这些参数',
+                  style: TextStyle(fontSize: 12),
+                ),
+              ),
+            if (navState.navParamsMessage != null) ...[
+              Text(
+                navState.navParamsMessage!,
+                style: TextStyle(
+                  color: AppTheme.mutedText(context),
+                  fontSize: 12,
+                ),
+              ),
+              const SizedBox(height: 8),
+            ],
+            const TabBar(
+              tabs: [
+                Tab(text: '本体'),
+                Tab(text: '绕障'),
+                Tab(text: '停障'),
+              ],
+            ),
+            SizedBox(
+              height: 312,
+              child: TabBarView(
+                children: [
+                  _buildRobotParamTab(navState.navParams),
+                  _buildFreeParamTab(navState.navParams),
+                  _buildFixedParamTab(navState.navParams),
+                ],
+              ),
+            ),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: navState.loading
+                        ? null
+                        : notifier.reloadSavedNavParams,
+                    icon: const Icon(Icons.download_outlined, size: 16),
+                    label: const Text('加载已保存'),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: FilledButton.icon(
+                    onPressed: navState.loading
+                        ? null
+                        : notifier.applyNavParams,
+                    icon: const Icon(Icons.check, size: 16),
+                    label: const Text('应用参数'),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildRobotParamTab(NavParamForm params) {
+    return ListView(
+      padding: const EdgeInsets.only(top: 12),
+      children: [
+        _ParamNumberField(
+          label: '雷达高度',
+          unit: 'm',
+          value: params.lidarHeight,
+          onChanged: (value) => ref
+              .read(navigationProvider.notifier)
+              .updateNavParam(NavParamField.lidarHeight, value),
+        ),
+        _ParamNumberField(
+          label: '本体长度',
+          unit: 'm',
+          value: params.robotLength,
+          onChanged: (value) => ref
+              .read(navigationProvider.notifier)
+              .updateNavParam(NavParamField.robotLength, value),
+        ),
+        _ParamNumberField(
+          label: '本体宽度',
+          unit: 'm',
+          value: params.robotWidth,
+          onChanged: (value) => ref
+              .read(navigationProvider.notifier)
+              .updateNavParam(NavParamField.robotWidth, value),
+        ),
+        _ParamNumberField(
+          label: '设备前向距离',
+          unit: 'm',
+          value: params.deviceFrontDistance,
+          onChanged: (value) => ref
+              .read(navigationProvider.notifier)
+              .updateNavParam(NavParamField.deviceFrontDistance, value),
+        ),
+        _ParamNumberField(
+          label: '设备左向距离',
+          unit: 'm',
+          value: params.deviceLeftDistance,
+          onChanged: (value) => ref
+              .read(navigationProvider.notifier)
+              .updateNavParam(NavParamField.deviceLeftDistance, value),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildFreeParamTab(NavParamForm params) {
+    return ListView(
+      padding: const EdgeInsets.only(top: 12),
+      children: [
+        _ParamNumberField(
+          label: '最低障碍高度',
+          unit: 'm',
+          value: params.freeMinObstacleHeight,
+          onChanged: (value) => ref
+              .read(navigationProvider.notifier)
+              .updateNavParam(NavParamField.freeMinObstacleHeight, value),
+        ),
+        _ParamNumberField(
+          label: '最高障碍高度',
+          unit: 'm',
+          value: params.freeMaxObstacleHeight,
+          onChanged: (value) => ref
+              .read(navigationProvider.notifier)
+              .updateNavParam(NavParamField.freeMaxObstacleHeight, value),
+        ),
+        _ParamNumberField(
+          label: '最大线速度',
+          unit: 'm/s',
+          value: params.freeLinearSpeed,
+          onChanged: (value) => ref
+              .read(navigationProvider.notifier)
+              .updateNavParam(NavParamField.freeLinearSpeed, value),
+        ),
+        _ParamNumberField(
+          label: '最大角速度',
+          unit: 'rad/s',
+          value: params.freeAngularSpeed,
+          onChanged: (value) => ref
+              .read(navigationProvider.notifier)
+              .updateNavParam(NavParamField.freeAngularSpeed, value),
+        ),
+        _ParamNumberField(
+          label: '到点距离',
+          unit: 'm',
+          value: params.freeXyGoalTolerance,
+          onChanged: (value) => ref
+              .read(navigationProvider.notifier)
+              .updateNavParam(NavParamField.freeXyGoalTolerance, value),
+        ),
+        _ParamNumberField(
+          label: '到点角度',
+          unit: 'rad',
+          value: params.freeYawGoalTolerance,
+          onChanged: (value) => ref
+              .read(navigationProvider.notifier)
+              .updateNavParam(NavParamField.freeYawGoalTolerance, value),
+        ),
+        _ParamNumberField(
+          label: '安全距离',
+          unit: 'm',
+          value: params.freeSafetyDistance,
+          onChanged: (value) => ref
+              .read(navigationProvider.notifier)
+              .updateNavParam(NavParamField.freeSafetyDistance, value),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildFixedParamTab(NavParamForm params) {
+    return ListView(
+      padding: const EdgeInsets.only(top: 12),
+      children: [
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('全向控制'),
+          value: params.holonomic,
+          onChanged: (value) =>
+              ref.read(navigationProvider.notifier).setHolonomic(value),
+        ),
+        _ParamNumberField(
+          label: '最大线速度',
+          unit: 'm/s',
+          value: params.fixedMaxLinearSpeed,
+          onChanged: (value) => ref
+              .read(navigationProvider.notifier)
+              .updateNavParam(NavParamField.fixedMaxLinearSpeed, value),
+        ),
+        _ParamNumberField(
+          label: '最大角速度',
+          unit: 'rad/s',
+          value: params.fixedMaxAngularSpeed,
+          onChanged: (value) => ref
+              .read(navigationProvider.notifier)
+              .updateNavParam(NavParamField.fixedMaxAngularSpeed, value),
+        ),
+        _ParamNumberField(
+          label: '到点距离',
+          unit: 'm',
+          value: params.fixedXyGoalTolerance,
+          onChanged: (value) => ref
+              .read(navigationProvider.notifier)
+              .updateNavParam(NavParamField.fixedXyGoalTolerance, value),
+        ),
+        _ParamNumberField(
+          label: '到点角度',
+          unit: 'rad',
+          value: params.fixedYawGoalTolerance,
+          onChanged: (value) => ref
+              .read(navigationProvider.notifier)
+              .updateNavParam(NavParamField.fixedYawGoalTolerance, value),
+        ),
+        _ParamNumberField(
+          label: '侧向安全距',
+          unit: 'm',
+          value: params.fixedLateralSafetyDistance,
+          onChanged: (value) => ref
+              .read(navigationProvider.notifier)
+              .updateNavParam(NavParamField.fixedLateralSafetyDistance, value),
+        ),
+        _ParamNumberField(
+          label: '前向停车距',
+          unit: 'm',
+          value: params.fixedForwardSafetyDistance,
+          onChanged: (value) => ref
+              .read(navigationProvider.notifier)
+              .updateNavParam(NavParamField.fixedForwardSafetyDistance, value),
+        ),
+      ],
     );
   }
 
@@ -239,6 +504,7 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen>
       ),
       body: Column(
         children: [
+          _buildSafetyBar(navState),
           // Map area
           Expanded(
             flex: 3,
@@ -262,24 +528,31 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen>
               children: [
                 TabBar(
                   controller: _tabController,
+                  isScrollable: true,
+                  tabAlignment: TabAlignment.start,
                   tabs: const [
                     Tab(text: '单点'),
                     Tab(text: '路径'),
                     Tab(text: '录制'),
+                    Tab(text: '重定位'),
+                    Tab(text: '路线'),
                   ],
                 ),
                 SizedBox(
-                  height: 186,
+                  height: 214,
                   child: TabBarView(
                     controller: _tabController,
                     children: [
                       _buildSinglePointTab(navState),
                       _buildPathTab(navState),
                       _buildRecordTab(navState),
+                      _buildRelocalizationTab(navState),
+                      _buildSavedRoutesTab(navState),
                     ],
                   ),
                 ),
                 _buildControlRow(navState),
+                _buildAuxiliaryRow(navState),
               ],
             ),
           ),
@@ -298,15 +571,26 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen>
       meta: navState.mapMeta,
       robotPose: navState.robotPose,
       trajectory: navState.trajectory,
-      goalPoint: navState.goalPoint,
+      goalPoint: navState.navMode == NavMode.relocalize
+          ? navState.relocalizationPose
+          : navState.goalPoint,
       waypoints: navState.waypoints.map((w) => (w.x, w.y)).toList(),
       plannedPath: navState.plannedPath,
       onTapWorld: (wx, wy) {
         if (navState.navMode == NavMode.singlePoint) {
-          notifier.navigateTo(wx, wy);
+          notifier.setGoalPoint(wx, wy);
         } else if (navState.navMode == NavMode.path ||
             navState.navMode == NavMode.record) {
           notifier.addWaypoint(wx, wy);
+        } else if (navState.navMode == NavMode.relocalize) {
+          notifier.setRelocalizationPose(wx, wy);
+        }
+      },
+      onPoseSelected: (wx, wy, theta) {
+        if (navState.navMode == NavMode.singlePoint) {
+          notifier.setGoalPoint(wx, wy, theta: theta);
+        } else if (navState.navMode == NavMode.relocalize) {
+          notifier.setRelocalizationPose(wx, wy, theta: theta);
         }
       },
     );
@@ -332,31 +616,54 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen>
 
   Widget _buildSinglePointTab(NavigationState navState) {
     final goal = navState.goalPoint;
+    final missionActive = navState.activeMission?.isActive == true;
     return Padding(
       padding: const EdgeInsets.all(12.0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
+          SegmentedButton<SingleMissionMode>(
+            segments: const [
+              ButtonSegment(
+                value: SingleMissionMode.standard,
+                label: Text('绕障'),
+                icon: Icon(Icons.route, size: 16),
+              ),
+              ButtonSegment(
+                value: SingleMissionMode.direct,
+                label: Text('停障'),
+                icon: Icon(Icons.linear_scale, size: 16),
+              ),
+            ],
+            selected: {navState.singleMissionMode},
+            showSelectedIcon: false,
+            onSelectionChanged: missionActive || navState.loading
+                ? null
+                : (values) => ref
+                      .read(navigationProvider.notifier)
+                      .setSingleMissionMode(values.first),
+          ),
+          const SizedBox(height: 10),
           if (goal != null)
             Text(
-              '目标点: (${goal.$1.toStringAsFixed(2)}, ${goal.$2.toStringAsFixed(2)}, θ=${goal.$3.toStringAsFixed(2)})',
+              '目标: x=${goal.$1.toStringAsFixed(2)}  y=${goal.$2.toStringAsFixed(2)}  θ=${goal.$3.toStringAsFixed(2)}',
               style: const TextStyle(fontSize: 13),
             )
           else
             Text(
-              '点击地图选择目标点',
+              '点击地图选点，长按拖拽设置方向',
               style: TextStyle(color: AppTheme.mutedText(context)),
             ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 10),
           ElevatedButton.icon(
-            onPressed: goal == null
+            onPressed: goal == null || missionActive || navState.loading
                 ? null
                 : () => ref
                       .read(navigationProvider.notifier)
-                      .navigateTo(goal.$1, goal.$2),
+                      .startSingleMission(),
             icon: const Icon(Icons.navigation, size: 16),
-            label: const Text('开始导航'),
+            label: Text(missionActive ? '任务执行中' : '开始导航'),
           ),
         ],
       ),
@@ -509,6 +816,104 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen>
     );
   }
 
+  Widget _buildRelocalizationTab(NavigationState navState) {
+    final pose = navState.relocalizationPose;
+    return Padding(
+      padding: const EdgeInsets.all(12.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          if (pose == null)
+            Text(
+              '点击地图选初始位置，长按拖拽设置方向',
+              style: TextStyle(color: AppTheme.mutedText(context)),
+            )
+          else
+            Text(
+              '初始位姿: x=${pose.$1.toStringAsFixed(2)}  y=${pose.$2.toStringAsFixed(2)}  θ=${pose.$3.toStringAsFixed(2)}',
+              style: const TextStyle(fontSize: 13),
+            ),
+          const SizedBox(height: 10),
+          ElevatedButton.icon(
+            onPressed: pose == null || navState.loading
+                ? null
+                : () => ref
+                      .read(navigationProvider.notifier)
+                      .submitRelocalizationPose(),
+            icon: const Icon(Icons.my_location, size: 16),
+            label: const Text('提交初始位姿'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSavedRoutesTab(NavigationState navState) {
+    final notifier = ref.read(navigationProvider.notifier);
+    final missionActive = navState.activeMission?.isActive == true;
+    final cycles = int.tryParse(_cyclesController.text) ?? 1;
+
+    return Padding(
+      padding: const EdgeInsets.all(12.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _routeNameController,
+                  decoration: const InputDecoration(
+                    isDense: true,
+                    labelText: '路线名称',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              FilledButton.icon(
+                onPressed: navState.loading || navState.waypoints.length < 2
+                    ? null
+                    : () =>
+                          notifier.saveCurrentRoute(_routeNameController.text),
+                icon: const Icon(Icons.save_outlined, size: 16),
+                label: const Text('保存'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Expanded(
+            child: navState.savedRoutes.isEmpty
+                ? Center(
+                    child: Text(
+                      '当前地图暂无保存路线',
+                      style: TextStyle(color: AppTheme.mutedText(context)),
+                    ),
+                  )
+                : ListView.separated(
+                    itemCount: navState.savedRoutes.length,
+                    separatorBuilder: (_, _) => const SizedBox(height: 8),
+                    itemBuilder: (context, index) {
+                      final route = navState.savedRoutes[index];
+                      return _SavedRouteTile(
+                        route: route,
+                        disabled: navState.loading,
+                        missionActive: missionActive,
+                        onStart: () => notifier.startSavedRoute(route, cycles),
+                        onLoad: () {
+                          notifier.loadSavedRoute(route);
+                          _tabController.animateTo(NavMode.path.index);
+                        },
+                      );
+                    },
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+
   // ─── Control row ────────────────────────────────────────────
 
   Widget _buildControlRow(NavigationState navState) {
@@ -550,13 +955,205 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen>
             color: AppTheme.success,
             onPressed: notifier.returnToOrigin,
           ),
-          const SizedBox(width: 12),
-          // Stop navigation
-          _ControlButton(
-            icon: Icons.stop,
-            label: '停止导航',
-            color: AppTheme.danger,
-            onPressed: notifier.stopNav,
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAuxiliaryRow(NavigationState navState) {
+    final wsManager = ref.watch(wsManagerProvider);
+    final activeConnection = ref.watch(activeConnectionProvider);
+    final pointCloudWsUrl = _navWsUrl(activeConnection?.baseUrl);
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+      child: Row(
+        children: [
+          Expanded(
+            child: OutlinedButton.icon(
+              onPressed: navState.navStatus == NavigationStatus.paused
+                  ? () => _showTeleopSheet(wsManager)
+                  : null,
+              icon: const Icon(Icons.gamepad_outlined, size: 18),
+              label: const Text('遥控器'),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: OutlinedButton.icon(
+              onPressed: pointCloudWsUrl == null
+                  ? null
+                  : () => _showPointCloudSheet(pointCloudWsUrl),
+              icon: const Icon(Icons.blur_on_outlined, size: 18),
+              label: const Text('点云'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSafetyBar(NavigationState navState) {
+    final notifier = ref.read(navigationProvider.notifier);
+    final mission = navState.activeMission;
+    final missionLabel = mission == null
+        ? '无任务'
+        : '${mission.mode ?? 'mission'} · ${mission.status}';
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+      child: Row(
+        children: [
+          Expanded(
+            child: StatusPill(
+              label: missionLabel,
+              color: mission?.isActive == true
+                  ? AppTheme.primaryColor
+                  : AppTheme.slate500,
+            ),
+          ),
+          const SizedBox(width: 8),
+          FilledButton.icon(
+            onPressed: navState.loading ? null : notifier.stopTask,
+            style: FilledButton.styleFrom(
+              backgroundColor: AppTheme.danger,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            ),
+            icon: const Icon(Icons.stop_circle_outlined, size: 18),
+            label: const Text('停止任务'),
+          ),
+          const SizedBox(width: 8),
+          OutlinedButton.icon(
+            onPressed: navState.loading ? null : _confirmCloseNavigation,
+            icon: const Icon(Icons.power_settings_new, size: 18),
+            label: const Text('关闭导航'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _confirmCloseNavigation() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('关闭导航'),
+        content: const Text('将停止当前任务并关闭导航容器，确认继续？'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('关闭'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true && mounted) {
+      await ref.read(navigationProvider.notifier).closeNavigation();
+    }
+  }
+
+  void _showPointCloudSheet(String wsUrl) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (context) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: SizedBox(
+            height: MediaQuery.of(context).size.height * 0.72,
+            child: _NavigationPointCloudCard(wsUrl: wsUrl),
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showTeleopSheet(WsConnectionManager wsManager) {
+    showModalBottomSheet<void>(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: _NavigationTeleopCard(wsManager: wsManager),
+        ),
+      ),
+    );
+  }
+
+  String? _navWsUrl(String? baseUrl) {
+    if (baseUrl == null || baseUrl.isEmpty) return null;
+    final uri = Uri.parse(baseUrl);
+    return Uri(
+      scheme: uri.scheme == 'https' ? 'wss' : 'ws',
+      host: uri.host,
+      port: 9089,
+    ).toString();
+  }
+}
+
+// ─── Helper widget ───────────────────────────────────────────
+
+class _SavedRouteTile extends StatelessWidget {
+  final NavLandmark route;
+  final bool disabled;
+  final bool missionActive;
+  final VoidCallback onStart;
+  final VoidCallback onLoad;
+
+  const _SavedRouteTile({
+    required this.route,
+    required this.disabled,
+    required this.missionActive,
+    required this.onStart,
+    required this.onLoad,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: AppTheme.subtleFill(context).withValues(alpha: 0.72),
+        border: Border.all(color: AppTheme.borderColor(context)),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  route.name.isEmpty ? '未命名路线' : route.name,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontWeight: FontWeight.w700),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  '${route.points.length} 个点',
+                  style: TextStyle(
+                    color: AppTheme.mutedText(context),
+                    fontSize: 12,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          IconButton(
+            tooltip: '加载到路径',
+            onPressed: disabled ? null : onLoad,
+            icon: const Icon(Icons.file_download_outlined),
+          ),
+          FilledButton.icon(
+            onPressed: disabled || missionActive ? null : onStart,
+            icon: const Icon(Icons.play_arrow, size: 16),
+            label: const Text('执行'),
           ),
         ],
       ),
@@ -564,7 +1161,201 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen>
   }
 }
 
-// ─── Helper widget ───────────────────────────────────────────
+class _NavigationPointCloudCard extends StatelessWidget {
+  final String wsUrl;
+
+  const _NavigationPointCloudCard({required this.wsUrl});
+
+  @override
+  Widget build(BuildContext context) {
+    return ConsoleCard(
+      title: '点云',
+      icon: Icons.blur_on_outlined,
+      padding: EdgeInsets.zero,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(13),
+        child: PointCloudViewer(
+          wsUrl: wsUrl,
+          pointCloudTopic: '/map_point_cloud',
+          accumulate: true,
+        ),
+      ),
+    );
+  }
+}
+
+class _NavigationTeleopCard extends StatefulWidget {
+  final WsConnectionManager wsManager;
+
+  const _NavigationTeleopCard({required this.wsManager});
+
+  @override
+  State<_NavigationTeleopCard> createState() => _NavigationTeleopCardState();
+}
+
+class _NavigationTeleopCardState extends State<_NavigationTeleopCard> {
+  static const _maxLinear = 0.75;
+  static const _maxAngular = 1.25;
+
+  double _speed = 0.35;
+  double _linear = 0;
+  double _angular = 0;
+
+  void _move(double x, double y) {
+    final linear = -y * _maxLinear * _speed;
+    final angular = -x * _maxAngular * _speed;
+    setState(() {
+      _linear = linear;
+      _angular = angular;
+    });
+    widget.wsManager.sendCmdVel(linear, angular);
+  }
+
+  void _stop() {
+    setState(() {
+      _linear = 0;
+      _angular = 0;
+    });
+    widget.wsManager.sendStop();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ConsoleCard(
+      title: '遥控器',
+      icon: Icons.gamepad_outlined,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          JoystickWidget(
+            size: 178,
+            stickColor: AppTheme.primaryColor,
+            baseColor: AppTheme.subtleFill(context).withValues(alpha: 0.9),
+            onMove: _move,
+            onRelease: _stop,
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Text('倍率', style: TextStyle(color: AppTheme.mutedText(context))),
+              Expanded(
+                child: Slider(
+                  value: _speed,
+                  min: 0.1,
+                  max: 1,
+                  divisions: 9,
+                  onChanged: (value) => setState(() => _speed = value),
+                ),
+              ),
+              SizedBox(
+                width: 46,
+                child: Text(
+                  '${(_speed * 100).round()}%',
+                  textAlign: TextAlign.right,
+                  style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'V ${_linear.toStringAsFixed(2)}',
+                style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+              ),
+              Text(
+                'W ${_angular.toStringAsFixed(2)}',
+                style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: _stop,
+              icon: const Icon(Icons.stop_rounded),
+              label: const Text('急停'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ParamNumberField extends StatefulWidget {
+  final String label;
+  final String unit;
+  final double value;
+  final ValueChanged<double> onChanged;
+
+  const _ParamNumberField({
+    required this.label,
+    required this.unit,
+    required this.value,
+    required this.onChanged,
+  });
+
+  @override
+  State<_ParamNumberField> createState() => _ParamNumberFieldState();
+}
+
+class _ParamNumberFieldState extends State<_ParamNumberField> {
+  late final TextEditingController _controller;
+  late final FocusNode _focusNode;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: _format(widget.value));
+    _focusNode = FocusNode();
+  }
+
+  @override
+  void didUpdateWidget(covariant _ParamNumberField oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!_focusNode.hasFocus && widget.value != oldWidget.value) {
+      _controller.text = _format(widget.value);
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    _focusNode.dispose();
+    super.dispose();
+  }
+
+  String _format(double value) => value.toStringAsFixed(2);
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: TextFormField(
+        controller: _controller,
+        focusNode: _focusNode,
+        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+        inputFormatters: [
+          FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d{0,3}')),
+        ],
+        decoration: InputDecoration(
+          labelText: widget.label,
+          suffixText: widget.unit,
+          isDense: true,
+          border: const OutlineInputBorder(),
+        ),
+        onChanged: (text) {
+          final parsed = double.tryParse(text);
+          if (parsed != null) widget.onChanged(parsed);
+        },
+      ),
+    );
+  }
+}
 
 class _ControlButton extends StatelessWidget {
   final IconData icon;

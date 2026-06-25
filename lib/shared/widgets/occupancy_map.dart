@@ -1,4 +1,4 @@
-import 'dart:math' show cos, sin;
+import 'dart:math' show atan2, cos, sin;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
@@ -18,6 +18,7 @@ class OccupancyMap extends StatefulWidget {
   final List<(double x, double y)> waypoints;
   final List<(double x, double y)> plannedPath;
   final void Function(double wx, double wy)? onTapWorld;
+  final void Function(double wx, double wy, double theta)? onPoseSelected;
 
   const OccupancyMap({
     super.key,
@@ -29,6 +30,7 @@ class OccupancyMap extends StatefulWidget {
     this.waypoints = const [],
     this.plannedPath = const [],
     this.onTapWorld,
+    this.onPoseSelected,
   });
 
   @override
@@ -38,6 +40,7 @@ class OccupancyMap extends StatefulWidget {
 class _OccupancyMapState extends State<OccupancyMap> {
   ui.Image? _mapImage;
   PgmImage? _pgm;
+  (double wx, double wy)? _poseStart;
 
   @override
   void initState() {
@@ -76,14 +79,47 @@ class _OccupancyMapState extends State<OccupancyMap> {
     );
   }
 
-  void _handleTap(TapDownDetails details, BoxConstraints constraints) {
-    if (widget.onTapWorld == null || widget.meta == null || _pgm == null) return;
+  (double wx, double wy)? _localToWorld(
+    Offset localPosition,
+    BoxConstraints constraints,
+  ) {
+    if (widget.meta == null || _pgm == null) return null;
     final scaleX = _pgm!.width / constraints.maxWidth;
     final scaleY = _pgm!.height / constraints.maxHeight;
-    final px = details.localPosition.dx * scaleX;
-    final py = details.localPosition.dy * scaleY;
-    final (wx, wy) = pixelToWorld(px, py, widget.meta!);
+    final px = localPosition.dx * scaleX;
+    final py = localPosition.dy * scaleY;
+    return pixelToWorld(px, py, widget.meta!);
+  }
+
+  void _handleTap(TapDownDetails details, BoxConstraints constraints) {
+    if (widget.onTapWorld == null) return;
+    final world = _localToWorld(details.localPosition, constraints);
+    if (world == null) return;
+    final (wx, wy) = world;
     widget.onTapWorld!(wx, wy);
+  }
+
+  void _handleLongPressStart(
+    LongPressStartDetails details,
+    BoxConstraints constraints,
+  ) {
+    _poseStart = _localToWorld(details.localPosition, constraints);
+  }
+
+  void _handleLongPressEnd(
+    LongPressEndDetails details,
+    BoxConstraints constraints,
+  ) {
+    final start = _poseStart;
+    _poseStart = null;
+    if (start == null || widget.onPoseSelected == null) return;
+
+    final end = _localToWorld(details.localPosition, constraints);
+    if (end == null) return;
+    final dx = end.$1 - start.$1;
+    final dy = end.$2 - start.$2;
+    final theta = dx.abs() < 0.01 && dy.abs() < 0.01 ? 0.0 : atan2(dy, dx);
+    widget.onPoseSelected!(start.$1, start.$2, theta);
   }
 
   @override
@@ -91,6 +127,8 @@ class _OccupancyMapState extends State<OccupancyMap> {
     return LayoutBuilder(
       builder: (context, constraints) => GestureDetector(
         onTapDown: (d) => _handleTap(d, constraints),
+        onLongPressStart: (d) => _handleLongPressStart(d, constraints),
+        onLongPressEnd: (d) => _handleLongPressEnd(d, constraints),
         child: CustomPaint(
           size: Size(constraints.maxWidth, constraints.maxHeight),
           painter: _MapPainter(
@@ -150,7 +188,10 @@ class _MapPainter extends CustomPainter {
         fit: BoxFit.fill,
       );
     } else {
-      canvas.drawRect(Offset.zero & size, Paint()..color = Colors.grey.shade800);
+      canvas.drawRect(
+        Offset.zero & size,
+        Paint()..color = Colors.grey.shade800,
+      );
       return;
     }
 
@@ -200,7 +241,7 @@ class _MapPainter extends CustomPainter {
       tp.paint(canvas, c.translate(-tp.width / 2, -tp.height / 2));
     }
 
-    // 5. 目标点（红 X）
+    // 5. 目标点（红 X + 方向）
     if (goalPoint != null) {
       final c = _worldToCanvas(goalPoint!.$1, goalPoint!.$2, size);
       final paint = Paint()
@@ -208,6 +249,10 @@ class _MapPainter extends CustomPainter {
         ..strokeWidth = 3;
       canvas.drawLine(c.translate(-8, -8), c.translate(8, 8), paint);
       canvas.drawLine(c.translate(-8, 8), c.translate(8, -8), paint);
+      final heading = goalPoint!.$3;
+      final tip = c.translate(22 * cos(heading), -22 * sin(heading));
+      canvas.drawLine(c, tip, paint);
+      canvas.drawCircle(tip, 4, Paint()..color = Colors.red);
     }
 
     // 6. 机器人位置（蓝圆 + 方向线）
@@ -216,9 +261,13 @@ class _MapPainter extends CustomPainter {
       canvas.drawCircle(c, 8, Paint()..color = Colors.blue);
       final heading = robotPose!.heading;
       final tip = c.translate(12 * cos(heading), -12 * sin(heading));
-      canvas.drawLine(c, tip, Paint()
-        ..color = Colors.white
-        ..strokeWidth = 2);
+      canvas.drawLine(
+        c,
+        tip,
+        Paint()
+          ..color = Colors.white
+          ..strokeWidth = 2,
+      );
     }
   }
 
@@ -228,5 +277,6 @@ class _MapPainter extends CustomPainter {
       old.robotPose != robotPose ||
       old.goalPoint != goalPoint ||
       old.trajectory.length != trajectory.length ||
+      old.waypoints.length != waypoints.length ||
       old.plannedPath.length != plannedPath.length;
 }
