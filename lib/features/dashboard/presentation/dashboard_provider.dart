@@ -214,6 +214,8 @@ class DashboardNotifier extends AutoDisposeAsyncNotifier<DashboardState> {
         await repo.stopMotion();
       }
       await _load();
+    } catch (e, st) {
+      state = AsyncValue.error(e, st);
     } finally {
       _setPending('motion', false);
     }
@@ -281,6 +283,8 @@ class DashboardNotifier extends AutoDisposeAsyncNotifier<DashboardState> {
     try {
       _setPending('motion-action:$id', true);
       await repo.triggerMotion(id);
+    } catch (e, st) {
+      state = AsyncValue.error(e, st);
     } finally {
       _setPending('motion-action:$id', false);
     }
