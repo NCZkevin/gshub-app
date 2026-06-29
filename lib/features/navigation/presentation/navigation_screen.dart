@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -9,6 +11,7 @@ import '../../../shared/widgets/console_widgets.dart';
 import '../../../shared/widgets/joystick_widget.dart';
 import '../../../shared/widgets/occupancy_map.dart';
 import '../../../shared/widgets/point_cloud_viewer.dart';
+import '../../../shared/widgets/video_view_widget.dart';
 import 'navigation_provider.dart';
 
 class NavigationScreen extends ConsumerStatefulWidget {
@@ -964,6 +967,7 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen>
     final wsManager = ref.watch(wsManagerProvider);
     final activeConnection = ref.watch(activeConnectionProvider);
     final pointCloudWsUrl = _navWsUrl(activeConnection?.baseUrl);
+    final janusWsUrl = _janusWsUrl(activeConnection?.baseUrl);
 
     return Container(
       padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
@@ -971,9 +975,7 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen>
         children: [
           Expanded(
             child: OutlinedButton.icon(
-              onPressed: navState.navStatus == NavigationStatus.paused
-                  ? () => _showTeleopSheet(wsManager)
-                  : null,
+              onPressed: () => _showTeleopSheet(wsManager),
               icon: const Icon(Icons.gamepad_outlined, size: 18),
               label: const Text('遥控器'),
             ),
@@ -986,6 +988,16 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen>
                   : () => _showPointCloudSheet(pointCloudWsUrl),
               icon: const Icon(Icons.blur_on_outlined, size: 18),
               label: const Text('点云'),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: OutlinedButton.icon(
+              onPressed: janusWsUrl == null
+                  ? null
+                  : () => _showVideoSheet(janusWsUrl),
+              icon: const Icon(Icons.videocam_outlined, size: 18),
+              label: const Text('视频流'),
             ),
           ),
         ],
@@ -1076,10 +1088,29 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen>
   void _showTeleopSheet(WsConnectionManager wsManager) {
     showModalBottomSheet<void>(
       context: context,
+      isScrollControlled: true,
       builder: (context) => SafeArea(
         child: Padding(
           padding: const EdgeInsets.all(12),
-          child: _NavigationTeleopCard(wsManager: wsManager),
+          child: SingleChildScrollView(
+            child: _NavigationTeleopCard(wsManager: wsManager),
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showVideoSheet(String janusWsUrl) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (context) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: SizedBox(
+            height: MediaQuery.of(context).size.height * 0.62,
+            child: _NavigationVideoCard(janusWsUrl: janusWsUrl),
+          ),
         ),
       ),
     );
@@ -1092,6 +1123,16 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen>
       scheme: uri.scheme == 'https' ? 'wss' : 'ws',
       host: uri.host,
       port: 9089,
+    ).toString();
+  }
+
+  String? _janusWsUrl(String? baseUrl) {
+    if (baseUrl == null || baseUrl.isEmpty) return null;
+    final uri = Uri.parse(baseUrl);
+    return Uri(
+      scheme: uri.scheme == 'https' ? 'wss' : 'ws',
+      host: uri.host,
+      port: 8188,
     ).toString();
   }
 }
@@ -1180,6 +1221,188 @@ class _NavigationPointCloudCard extends StatelessWidget {
           accumulate: true,
         ),
       ),
+    );
+  }
+}
+
+class _NavigationVideoCard extends StatefulWidget {
+  final String janusWsUrl;
+
+  const _NavigationVideoCard({required this.janusWsUrl});
+
+  @override
+  State<_NavigationVideoCard> createState() => _NavigationVideoCardState();
+}
+
+class _NavigationVideoCardState extends State<_NavigationVideoCard> {
+  late final JanusVideoController _left;
+  late final JanusVideoController _right;
+  late final Future<void> _initFuture;
+  bool _ready = false;
+  bool _playing = false;
+  bool _busy = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _left = JanusVideoController(streamId: 100);
+    _right = JanusVideoController(streamId: 101);
+    _initFuture = _initialize();
+  }
+
+  Future<void> _initialize() async {
+    await Future.wait([_left.initialize(), _right.initialize()]);
+    if (mounted) setState(() => _ready = true);
+  }
+
+  @override
+  void dispose() {
+    unawaited(_disposeControllers());
+    super.dispose();
+  }
+
+  Future<void> _disposeControllers() async {
+    try {
+      await _initFuture;
+    } catch (_) {}
+    await Future.wait([_left.dispose(), _right.dispose()]);
+  }
+
+  Future<void> _play() async {
+    if (_busy || !_ready) return;
+    setState(() => _busy = true);
+    try {
+      await Future.wait([
+        _connect(_left, widget.janusWsUrl),
+        _connect(_right, widget.janusWsUrl),
+      ]);
+      if (mounted) setState(() => _playing = true);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _connect(JanusVideoController controller, String url) async {
+    try {
+      await controller.connect(url);
+    } catch (e) {
+      controller.status.value = '连接失败: $e';
+    }
+  }
+
+  Future<void> _stop() async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      await Future.wait([_left.stop(), _right.stop()]);
+      if (mounted) setState(() => _playing = false);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ConsoleCard(
+      title: '视频流',
+      icon: Icons.videocam_outlined,
+      trailing: StatusPill(
+        label: _playing
+            ? 'LIVE'
+            : _busy
+            ? 'STARTING'
+            : 'STANDBY',
+        color: _playing
+            ? AppTheme.danger
+            : _busy
+            ? AppTheme.warning
+            : AppTheme.slate500,
+      ),
+      padding: EdgeInsets.zero,
+      child: Column(
+        children: [
+          Expanded(
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(13),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: _NavigationStreamPane(label: '左', controller: _left),
+                  ),
+                  Expanded(
+                    child: _NavigationStreamPane(
+                      label: '右',
+                      controller: _right,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+            child: Align(
+              alignment: Alignment.centerRight,
+              child: FilledButton.tonalIcon(
+                onPressed: _ready && !_busy ? (_playing ? _stop : _play) : null,
+                icon: _busy
+                    ? const SizedBox.square(
+                        dimension: 15,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : Icon(
+                        _playing
+                            ? Icons.stop_rounded
+                            : Icons.play_arrow_rounded,
+                      ),
+                label: Text(_playing ? '停止' : '播放'),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _NavigationStreamPane extends StatelessWidget {
+  final String label;
+  final JanusVideoController controller;
+
+  const _NavigationStreamPane({required this.label, required this.controller});
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        VideoViewWidget(
+          renderer: controller.renderer,
+          placeholderText: 'NO SIGNAL',
+        ),
+        Positioned(
+          left: 8,
+          bottom: 8,
+          child: ValueListenableBuilder<String>(
+            valueListenable: controller.status,
+            builder: (context, status, _) => Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+              decoration: BoxDecoration(
+                color: Colors.black.withValues(alpha: 0.55),
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Text(
+                '$label · $status',
+                style: const TextStyle(
+                  color: Colors.white70,
+                  fontFamily: 'monospace',
+                  fontSize: 11,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

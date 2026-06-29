@@ -759,6 +759,9 @@ class NavigationNotifier extends AutoDisposeAsyncNotifier<NavigationState> {
       case 'pending':
       case 'running':
       case 'active':
+        if (fallback == NavigationStatus.paused) {
+          return NavigationStatus.paused;
+        }
         return NavigationStatus.navigating;
       case 'paused':
         return NavigationStatus.paused;
@@ -1212,6 +1215,12 @@ class NavigationNotifier extends AutoDisposeAsyncNotifier<NavigationState> {
     try {
       final repo = await ref.read(navigationRepositoryProvider.future);
       await repo?.pauseNav();
+      final cur = state.value;
+      if (cur != null) {
+        state = AsyncValue.data(
+          cur.copyWith(navStatus: NavigationStatus.paused),
+        );
+      }
     } catch (e) {
       final cur = state.value;
       if (cur != null) {
@@ -1224,6 +1233,12 @@ class NavigationNotifier extends AutoDisposeAsyncNotifier<NavigationState> {
     try {
       final repo = await ref.read(navigationRepositoryProvider.future);
       await repo?.resumeNav();
+      final cur = state.value;
+      if (cur != null) {
+        state = AsyncValue.data(
+          cur.copyWith(navStatus: NavigationStatus.navigating),
+        );
+      }
     } catch (e) {
       final cur = state.value;
       if (cur != null) {

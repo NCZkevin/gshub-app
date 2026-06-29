@@ -196,6 +196,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.textContaining('目标: x='), findsOneWidget);
+    expect(find.text('视频流'), findsOneWidget);
     expect(_FakeNavigationNotifier.startMissionCount, 0);
     expect(tester.takeException(), isNull);
     manager.dispose();
@@ -316,6 +317,30 @@ void main() {
     await tester.tap(find.byTooltip('加载到路径'));
     await tester.pumpAndSettle();
     expect(_FakeNavigationNotifier.loadSavedRouteCount, 1);
+    expect(tester.takeException(), isNull);
+    manager.dispose();
+  });
+
+  testWidgets('teleop button opens sheet from any navigation status', (
+    tester,
+  ) async {
+    final manager = WsConnectionManager();
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          navigationProvider.overrideWith(_FakeNavigationNotifier.new),
+          wsManagerProvider.overrideWithValue(manager),
+          activeConnectionProvider.overrideWithValue(null),
+        ],
+        child: const MaterialApp(home: NavigationScreen()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.widgetWithText(OutlinedButton, '遥控器'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('急停'), findsOneWidget);
     expect(tester.takeException(), isNull);
     manager.dispose();
   });
