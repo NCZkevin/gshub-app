@@ -182,6 +182,24 @@ class SettingsScreen extends ConsumerWidget {
           ),
           const SizedBox(height: 12),
 
+          // ─── 诊断 ─────────────────────────────────────────────
+          ConsoleCard(
+            title: '诊断',
+            icon: Icons.build_circle_outlined,
+            child: ListTile(
+              dense: true,
+              visualDensity: VisualDensity.compact,
+              contentPadding: EdgeInsets.zero,
+              minLeadingWidth: 28,
+              leading: const Icon(Icons.article_outlined, size: 20),
+              title: Text('运行日志', style: _titleStyle(context)),
+              subtitle: Text('查看设备和服务日志', style: _subtitleStyle(context)),
+              trailing: const Icon(Icons.chevron_right_rounded),
+              onTap: () => context.push('/logs'),
+            ),
+          ),
+          const SizedBox(height: 12),
+
           // ─── 关于 ─────────────────────────────────────────────
           ConsoleCard(
             title: '关于',

@@ -6,6 +6,7 @@ import '../features/dashboard/presentation/dashboard_screen.dart';
 import '../features/navigation/presentation/navigation_screen.dart';
 import '../features/mapping/presentation/mapping_screen.dart';
 import '../features/logs/presentation/logs_screen.dart';
+import '../features/remote/presentation/remote_screen.dart';
 import '../features/settings/presentation/settings_screen.dart';
 import 'adaptive_shell.dart';
 
@@ -28,39 +29,38 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/connection',
         builder: (context, state) => const ConnectionScreen(),
       ),
+      GoRoute(
+        path: '/remote',
+        builder: (context, state) => const RemoteScreen(),
+      ),
       ShellRoute(
         builder: (context, state, child) =>
             AdaptiveShell(state: state, child: child),
         routes: [
           GoRoute(
             path: '/dashboard',
-            pageBuilder: (context, state) => const NoTransitionPage(
-              child: DashboardScreen(),
-            ),
+            pageBuilder: (context, state) =>
+                const NoTransitionPage(child: DashboardScreen()),
           ),
           GoRoute(
             path: '/navigation',
-            pageBuilder: (context, state) => const NoTransitionPage(
-              child: NavigationScreen(),
-            ),
+            pageBuilder: (context, state) =>
+                const NoTransitionPage(child: NavigationScreen()),
           ),
           GoRoute(
             path: '/mapping',
-            pageBuilder: (context, state) => const NoTransitionPage(
-              child: MappingScreen(),
-            ),
+            pageBuilder: (context, state) =>
+                const NoTransitionPage(child: MappingScreen()),
           ),
           GoRoute(
             path: '/logs',
-            pageBuilder: (context, state) => const NoTransitionPage(
-              child: LogsScreen(),
-            ),
+            pageBuilder: (context, state) =>
+                const NoTransitionPage(child: LogsScreen()),
           ),
           GoRoute(
             path: '/settings',
-            pageBuilder: (context, state) => const NoTransitionPage(
-              child: SettingsScreen(),
-            ),
+            pageBuilder: (context, state) =>
+                const NoTransitionPage(child: SettingsScreen()),
           ),
         ],
       ),

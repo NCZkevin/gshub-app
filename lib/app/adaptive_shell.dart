@@ -29,10 +29,10 @@ class AdaptiveShell extends StatelessWidget {
       label: '建图',
     ),
     (
-      route: '/logs',
-      icon: Icons.article_outlined,
-      activeIcon: Icons.article,
-      label: '日志',
+      route: '/remote',
+      icon: Icons.sports_esports_outlined,
+      activeIcon: Icons.sports_esports,
+      label: '遥控',
     ),
     (
       route: '/settings',
@@ -64,7 +64,7 @@ class AdaptiveShell extends StatelessWidget {
               groupAlignment: -0.76,
               selectedIndex: selectedIndex,
               labelType: NavigationRailLabelType.selected,
-              onDestinationSelected: (i) => context.go(_tabs[i].route),
+              onDestinationSelected: (i) => _go(context, _tabs[i].route),
               leading: Padding(
                 padding: const EdgeInsets.only(top: 18, bottom: 24),
                 child: Container(
@@ -120,7 +120,7 @@ class AdaptiveShell extends StatelessWidget {
               ),
               child: NavigationBar(
                 selectedIndex: selectedIndex,
-                onDestinationSelected: (i) => context.go(_tabs[i].route),
+                onDestinationSelected: (i) => _go(context, _tabs[i].route),
                 destinations: _tabs
                     .map(
                       (t) => NavigationDestination(
@@ -136,5 +136,13 @@ class AdaptiveShell extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  void _go(BuildContext context, String route) {
+    if (route == '/remote') {
+      context.push(route);
+    } else {
+      context.go(route);
+    }
   }
 }

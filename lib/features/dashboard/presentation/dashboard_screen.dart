@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import '../../../app/theme.dart';
 import '../../../core/websocket/ws_connection_manager.dart';
 import '../../../features/connection/presentation/connection_provider.dart';
@@ -142,7 +143,7 @@ class _WideLayout extends ConsumerWidget {
         ),
         // 中列：视频 + 系统指标
         Expanded(
-          child: Padding(
+          child: SingleChildScrollView(
             padding: const EdgeInsets.all(12),
             child: Column(
               children: [
@@ -748,6 +749,11 @@ class _TeleopCardState extends State<_TeleopCard> {
     return ConsoleCard(
       title: '遥控器',
       icon: Icons.gamepad_outlined,
+      trailing: IconButton(
+        tooltip: '全屏遥控',
+        onPressed: () => context.push('/remote'),
+        icon: const Icon(Icons.open_in_full_rounded, size: 18),
+      ),
       child: Column(
         children: [
           _TeleopStatusBar(
