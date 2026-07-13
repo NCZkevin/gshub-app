@@ -1,10 +1,14 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../app/theme.dart';
 import '../../../shared/widgets/console_widgets.dart';
 import 'connection_provider.dart';
+import '../data/device_discovery_repository.dart';
 import '../domain/connection_model.dart';
+import '../../settings/data/settings_repository.dart';
 
 class ConnectionScreen extends ConsumerStatefulWidget {
   const ConnectionScreen({super.key});
@@ -42,7 +46,7 @@ class _ConnectionScreenState extends ConsumerState<ConnectionScreen> {
         actions: [
           IconButton(
             icon: const Icon(Icons.add),
-            onPressed: () => _showEditDialog(context, null),
+            onPressed: () => _showAddDialog(context),
           ),
         ],
       ),
@@ -63,7 +67,7 @@ class _ConnectionScreenState extends ConsumerState<ConnectionScreen> {
                       ElevatedButton.icon(
                         icon: const Icon(Icons.add),
                         label: const Text('添加机器'),
-                        onPressed: () => _showEditDialog(context, null),
+                        onPressed: () => _showAddDialog(context),
                       ),
                     ],
                   ),
@@ -135,7 +139,11 @@ class _ConnectionScreenState extends ConsumerState<ConnectionScreen> {
     );
   }
 
-  void _showEditDialog(BuildContext context, RobotConnection? existing) {
+  void _showAddDialog(BuildContext context) {
+    showDialog(context: context, builder: (_) => const _AddConnectionDialog());
+  }
+
+  void _showEditDialog(BuildContext context, RobotConnection existing) {
     showDialog(
       context: context,
       builder: (_) => _EditConnectionDialog(existing: existing),
@@ -166,9 +174,206 @@ class _ConnectionScreenState extends ConsumerState<ConnectionScreen> {
   }
 }
 
+class _AddConnectionDialog extends ConsumerStatefulWidget {
+  const _AddConnectionDialog();
+
+  @override
+  ConsumerState<_AddConnectionDialog> createState() =>
+      _AddConnectionDialogState();
+}
+
+class _AddConnectionDialogState extends ConsumerState<_AddConnectionDialog> {
+  final _hostCtrl = TextEditingController();
+  final _portCtrl = TextEditingController(text: '8898');
+  List<DiscoveredRobot> _devices = const [];
+  bool _scanning = false;
+  bool _adding = false;
+  bool _advanced = false;
+  String? _error;
+  Timer? _rescanTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    _scan();
+  }
+
+  @override
+  void dispose() {
+    _rescanTimer?.cancel();
+    _hostCtrl.dispose();
+    _portCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _scan() async {
+    if (_scanning) return;
+    _rescanTimer?.cancel();
+    setState(() {
+      _scanning = true;
+      _error = null;
+    });
+    try {
+      final devices = await ref
+          .read(deviceDiscoveryRepositoryProvider)
+          .discover();
+      if (mounted) setState(() => _devices = devices);
+    } catch (e) {
+      if (mounted) setState(() => _error = '搜索失败：$e');
+    } finally {
+      if (mounted) {
+        setState(() => _scanning = false);
+        _rescanTimer = Timer(const Duration(seconds: 2), _scan);
+      }
+    }
+  }
+
+  Future<void> _add(DiscoveredRobot robot) async {
+    if (_adding) return;
+    setState(() {
+      _adding = true;
+      _error = null;
+    });
+    try {
+      await ref.read(connectionProvider.notifier).addDiscovered(robot);
+      if (mounted) Navigator.of(context).pop();
+    } catch (e) {
+      if (mounted) setState(() => _error = '添加失败：$e');
+    } finally {
+      if (mounted) setState(() => _adding = false);
+    }
+  }
+
+  Future<void> _addManual() async {
+    final host = _normalizeHost(_hostCtrl.text);
+    final port = int.tryParse(_portCtrl.text.trim());
+    if (host.isEmpty) {
+      setState(() => _error = '请输入 IP 地址或主机名');
+      return;
+    }
+    if (port == null || port < 1 || port > 65535) {
+      setState(() => _error = '端口格式不正确');
+      return;
+    }
+    setState(() {
+      _adding = true;
+      _error = null;
+    });
+    try {
+      final robot = await ref
+          .read(deviceDiscoveryRepositoryProvider)
+          .probe(host: host, port: port);
+      await ref.read(connectionProvider.notifier).addDiscovered(robot);
+      if (mounted) Navigator.of(context).pop();
+    } catch (e) {
+      if (mounted) setState(() => _error = '无法识别该机器：$e');
+    } finally {
+      if (mounted) setState(() => _adding = false);
+    }
+  }
+
+  String _normalizeHost(String value) {
+    final raw = value.trim();
+    final uri = Uri.tryParse(raw.contains('://') ? raw : 'http://$raw');
+    return uri?.host ?? '';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Row(
+        children: [
+          const Expanded(child: Text('添加机器')),
+          IconButton(
+            tooltip: '重新搜索',
+            onPressed: _scanning || _adding ? null : _scan,
+            icon: const Icon(Icons.refresh),
+          ),
+        ],
+      ),
+      content: SizedBox(
+        width: 480,
+        child: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (_scanning) const LinearProgressIndicator(),
+              if (!_scanning && _devices.isEmpty)
+                const EmptyState(icon: Icons.radar, label: '未发现附近机器')
+              else if (_devices.isNotEmpty)
+                ..._devices.map(
+                  (robot) => ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Icon(Icons.precision_manufacturing_outlined),
+                    title: Text(robot.sn),
+                    subtitle: Text(
+                      [
+                        if (robot.model?.isNotEmpty == true) robot.model!,
+                        if (robot.version?.isNotEmpty == true) robot.version!,
+                        '${robot.host}:${robot.port}',
+                      ].join(' · '),
+                    ),
+                    trailing: FilledButton(
+                      onPressed: _adding ? null : () => _add(robot),
+                      child: const Text('添加'),
+                    ),
+                  ),
+                ),
+              const Divider(height: 28),
+              TextField(
+                controller: _hostCtrl,
+                enabled: !_adding,
+                decoration: const InputDecoration(
+                  labelText: 'IP 地址或主机名',
+                  hintText: '192.168.1.100',
+                ),
+              ),
+              TextButton.icon(
+                onPressed: _adding
+                    ? null
+                    : () => setState(() => _advanced = !_advanced),
+                icon: Icon(_advanced ? Icons.expand_less : Icons.expand_more),
+                label: const Text('高级设置'),
+              ),
+              if (_advanced)
+                TextField(
+                  controller: _portCtrl,
+                  enabled: !_adding,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(labelText: 'API 端口'),
+                ),
+              if (_error != null) ...[
+                const SizedBox(height: 8),
+                Text(_error!, style: const TextStyle(color: AppTheme.danger)),
+              ],
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _adding ? null : () => Navigator.of(context).pop(),
+          child: const Text('取消'),
+        ),
+        ElevatedButton(
+          onPressed: _adding ? null : _addManual,
+          child: _adding
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Text('通过地址添加'),
+        ),
+      ],
+    );
+  }
+}
+
 class _EditConnectionDialog extends ConsumerStatefulWidget {
-  final RobotConnection? existing;
-  const _EditConnectionDialog({this.existing});
+  final RobotConnection existing;
+  const _EditConnectionDialog({required this.existing});
 
   @override
   ConsumerState<_EditConnectionDialog> createState() =>
@@ -182,25 +387,22 @@ class _EditConnectionDialogState extends ConsumerState<_EditConnectionDialog> {
   late final TextEditingController _tokenCtrl;
   bool _loading = false;
   String? _error;
-
-  bool get _isEdit => widget.existing != null;
+  String _originalToken = '';
 
   @override
   void initState() {
     super.initState();
-    _nameCtrl = TextEditingController(text: widget.existing?.name ?? '');
-    _urlCtrl = TextEditingController(
-      text: widget.existing?.baseUrl ?? 'http://',
-    );
+    _nameCtrl = TextEditingController(text: widget.existing.name);
+    _urlCtrl = TextEditingController(text: widget.existing.baseUrl);
     _tokenCtrl = TextEditingController();
-    // Pre-fill token for edits
-    if (_isEdit) _loadToken();
+    _loadToken();
   }
 
   Future<void> _loadToken() async {
     final repo = ref.read(connectionRepositoryProvider);
-    final token = await repo.getApiToken(widget.existing!.id);
+    final token = await repo.getApiToken(widget.existing.id);
     if (mounted && token != null) {
+      _originalToken = token;
       _tokenCtrl.text = token;
     }
   }
@@ -221,21 +423,18 @@ class _EditConnectionDialogState extends ConsumerState<_EditConnectionDialog> {
     });
     try {
       final url = _urlCtrl.text.trim().replaceAll(RegExp(r'/$'), '');
-      final notifier = ref.read(connectionProvider.notifier);
-      if (_isEdit) {
-        await notifier.update(
-          id: widget.existing!.id,
-          name: _nameCtrl.text.trim(),
-          baseUrl: url,
-          apiToken: _tokenCtrl.text.trim(),
-        );
-      } else {
-        await notifier.add(
-          name: _nameCtrl.text.trim(),
-          baseUrl: url,
-          apiToken: _tokenCtrl.text.trim(),
-        );
+      final token = _tokenCtrl.text.trim();
+      if (token.isNotEmpty &&
+          (token != _originalToken || url != widget.existing.baseUrl)) {
+        await SettingsRepository().verifyToken(url, token);
       }
+      final notifier = ref.read(connectionProvider.notifier);
+      await notifier.update(
+        id: widget.existing.id,
+        name: _nameCtrl.text.trim(),
+        baseUrl: url,
+        apiToken: token,
+      );
       if (mounted) Navigator.of(context).pop();
     } catch (e) {
       setState(() => _error = e.toString());
@@ -247,7 +446,7 @@ class _EditConnectionDialogState extends ConsumerState<_EditConnectionDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: Text(_isEdit ? '编辑机器' : '添加机器'),
+      title: const Text('编辑机器'),
       content: Form(
         key: _formKey,
         child: SingleChildScrollView(
@@ -277,10 +476,8 @@ class _EditConnectionDialogState extends ConsumerState<_EditConnectionDialog> {
               const SizedBox(height: 12),
               TextFormField(
                 controller: _tokenCtrl,
-                decoration: const InputDecoration(labelText: 'API Token'),
+                decoration: const InputDecoration(labelText: 'API Token（可选）'),
                 obscureText: true,
-                validator: (v) =>
-                    (v == null || v.trim().isEmpty) ? '请输入 Token' : null,
               ),
               if (_error != null) ...[
                 const SizedBox(height: 8),

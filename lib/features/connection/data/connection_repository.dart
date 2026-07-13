@@ -1,7 +1,6 @@
 import 'dart:convert';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:uuid/uuid.dart';
 import '../domain/connection_model.dart';
 
 const _kConnectionsKey = 'robot_connections';
@@ -12,13 +11,11 @@ const _kTerminalTokenPrefix = 'terminal_token_';
 class ConnectionRepository {
   final SharedPreferences _prefs;
   final FlutterSecureStorage _secure;
-  static const _uuid = Uuid();
-
   ConnectionRepository({
     required SharedPreferences prefs,
     required FlutterSecureStorage secure,
-  })  : _prefs = prefs,
-        _secure = secure;
+  }) : _prefs = prefs,
+       _secure = secure;
 
   List<RobotConnection> loadAll() {
     final raw = _prefs.getString(_kConnectionsKey);
@@ -29,14 +26,12 @@ class ConnectionRepository {
       final list = decoded is String
           ? jsonDecode(decoded) as List<dynamic>
           : decoded as List<dynamic>;
-      return list
-          .map((e) {
-            final map = e is String
-                ? jsonDecode(e) as Map<String, dynamic>
-                : e as Map<String, dynamic>;
-            return RobotConnection.fromJson(map);
-          })
-          .toList();
+      return list.map((e) {
+        final map = e is String
+            ? jsonDecode(e) as Map<String, dynamic>
+            : e as Map<String, dynamic>;
+        return RobotConnection.fromJson(map);
+      }).toList();
     } catch (_) {
       // Corrupted data — reset
       _prefs.remove(_kConnectionsKey);
@@ -55,7 +50,9 @@ class ConnectionRepository {
       all.add(conn);
     }
     await _prefs.setString(
-        _kConnectionsKey, jsonEncode(all.map((c) => c.toJson()).toList()));
+      _kConnectionsKey,
+      jsonEncode(all.map((c) => c.toJson()).toList()),
+    );
   }
 
   Future<void> setActive(String id) async {
@@ -65,7 +62,9 @@ class ConnectionRepository {
   Future<void> delete(String id) async {
     final all = loadAll()..removeWhere((c) => c.id == id);
     await _prefs.setString(
-        _kConnectionsKey, jsonEncode(all.map((c) => c.toJson()).toList()));
+      _kConnectionsKey,
+      jsonEncode(all.map((c) => c.toJson()).toList()),
+    );
     await _secure.delete(key: '$_kApiTokenPrefix$id');
     await _secure.delete(key: '$_kTerminalTokenPrefix$id');
     if (getActiveId() == id) {
@@ -79,11 +78,14 @@ class ConnectionRepository {
   Future<String?> getTerminalToken(String id) =>
       _secure.read(key: '$_kTerminalTokenPrefix$id');
 
-  Future<void> saveApiToken(String id, String token) =>
-      _secure.write(key: '$_kApiTokenPrefix$id', value: token);
+  Future<void> saveApiToken(String id, String token) {
+    final normalized = token.trim();
+    if (normalized.isEmpty) {
+      return _secure.delete(key: '$_kApiTokenPrefix$id');
+    }
+    return _secure.write(key: '$_kApiTokenPrefix$id', value: normalized);
+  }
 
   Future<void> saveTerminalToken(String id, String token) =>
       _secure.write(key: '$_kTerminalTokenPrefix$id', value: token);
-
-  String generateId() => _uuid.v4();
 }

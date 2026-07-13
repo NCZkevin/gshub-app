@@ -661,6 +661,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.0.5"
+  multicast_dns:
+    dependency: "direct main"
+    description:
+      name: multicast_dns
+      sha256: "134668a9605c747322d8c3eb0e89a4c0cbdedb29f8d2d5ae29d14daef724987b"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.3.3+1"
   objective_c:
     dependency: transitive
     description:
@@ -1011,7 +1019,7 @@ packages:
     source: hosted
     version: "1.4.0"
   uuid:
-    dependency: "direct main"
+    dependency: transitive
     description:
       name: uuid
       sha256: "1fef9e8e11e2991bb773070d4656b7bd5d850967a2456cfc83cf47925ba79489"

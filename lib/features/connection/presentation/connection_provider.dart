@@ -4,6 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../../core/api/dio_client.dart';
 import '../../../core/websocket/ws_connection_manager.dart';
 import '../data/connection_repository.dart';
+import '../data/device_discovery_repository.dart';
 import '../domain/connection_model.dart';
 
 // ─── Infrastructure Providers ────────────────────────────────
@@ -24,6 +25,38 @@ final connectionRepositoryProvider = Provider<ConnectionRepository>((ref) {
     secure: ref.watch(secureStorageProvider),
   );
 });
+
+final deviceDiscoveryRepositoryProvider = Provider<DeviceDiscoveryRepository>(
+  (ref) => DeviceDiscoveryRepository(),
+);
+
+class AuthPromptNotifier extends Notifier<String?> {
+  final Set<String> _suppressed = <String>{};
+
+  @override
+  String? build() => null;
+
+  void requireToken(String connectionId) {
+    if (_suppressed.contains(connectionId)) return;
+    state ??= connectionId;
+  }
+
+  void dismiss() {
+    if (state case final connectionId?) {
+      _suppressed.add(connectionId);
+    }
+    state = null;
+  }
+
+  void reset(String connectionId) {
+    _suppressed.remove(connectionId);
+    if (state == connectionId) state = null;
+  }
+}
+
+final authPromptProvider = NotifierProvider<AuthPromptNotifier, String?>(
+  AuthPromptNotifier.new,
+);
 
 // ─── Connection State ─────────────────────────────────────────
 
@@ -56,22 +89,43 @@ class ConnectionNotifier extends Notifier<ConnectionState> {
   }
 
   Future<void> add({
+    required String id,
     required String name,
     required String baseUrl,
-    required String apiToken,
+    String apiToken = '',
     String? terminalToken,
   }) async {
     final repo = ref.read(connectionRepositoryProvider);
-    final id = repo.generateId();
     final conn = RobotConnection(id: id, name: name, baseUrl: baseUrl);
     await repo.save(conn);
     await repo.saveApiToken(id, apiToken);
+    ref.read(authPromptProvider.notifier).reset(id);
     if (terminalToken != null && terminalToken.isNotEmpty) {
       await repo.saveTerminalToken(id, terminalToken);
     }
     state = state.copyWith(connections: repo.loadAll());
     // 自动选为活跃机器（如果是第一个）
-    if (state.connections.length == 1) await activate(id);
+    if (state.activeId == null) await activate(id);
+  }
+
+  Future<void> addDiscovered(DiscoveredRobot robot) async {
+    final existing = state.connections
+        .where((c) => c.id == robot.sn)
+        .firstOrNull;
+    final repo = ref.read(connectionRepositoryProvider);
+    final conn = RobotConnection(
+      id: robot.sn,
+      name: existing?.name ?? robot.sn,
+      baseUrl: robot.baseUrl,
+    );
+    await repo.save(conn);
+    state = state.copyWith(connections: repo.loadAll());
+    if (state.activeId == null) await activate(robot.sn);
+    if (state.activeId == robot.sn) {
+      ref.invalidate(dioClientProvider);
+      ref.invalidate(dioClientFutureProvider);
+      ref.invalidate(wsManagerProvider);
+    }
   }
 
   Future<void> activate(String id) async {
@@ -93,10 +147,12 @@ class ConnectionNotifier extends Notifier<ConnectionState> {
     final conn = RobotConnection(id: id, name: name, baseUrl: baseUrl);
     await repo.save(conn);
     await repo.saveApiToken(id, apiToken);
+    ref.read(authPromptProvider.notifier).reset(id);
     state = state.copyWith(connections: repo.loadAll());
     // Re-init active connection if this is the active one
     if (state.activeId == id) {
       ref.invalidate(dioClientProvider);
+      ref.invalidate(dioClientFutureProvider);
       ref.invalidate(wsManagerProvider);
     }
   }
@@ -131,8 +187,14 @@ final dioClientFutureProvider = FutureProvider<DioClient?>((ref) async {
   final conn = ref.watch(activeConnectionProvider);
   if (conn == null) return null;
   final repo = ref.read(connectionRepositoryProvider);
-  final token = await repo.getApiToken(conn.id) ?? '';
-  return DioClient.create(baseUrl: conn.baseUrl, authToken: token);
+  final token = await repo.getApiToken(conn.id);
+  return DioClient.create(
+    baseUrl: conn.baseUrl,
+    authToken: token,
+    onUnauthorized: () {
+      ref.read(authPromptProvider.notifier).requireToken(conn.id);
+    },
+  );
 });
 
 final wsManagerProvider = Provider<WsConnectionManager>((ref) {

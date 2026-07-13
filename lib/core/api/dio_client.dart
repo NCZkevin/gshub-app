@@ -9,7 +9,8 @@ class DioClient {
 
   factory DioClient.create({
     required String baseUrl,
-    required String authToken,
+    String? authToken,
+    void Function()? onUnauthorized,
   }) {
     final dio = Dio(
       BaseOptions(
@@ -20,7 +21,9 @@ class DioClient {
         contentType: 'application/json',
       ),
     );
-    dio.interceptors.add(_AuthInterceptor(authToken: authToken));
+    dio.interceptors.add(
+      _AuthInterceptor(authToken: authToken, onUnauthorized: onUnauthorized),
+    );
     dio.interceptors.add(_EnvelopeInterceptor());
     return DioClient._(dio: dio);
   }
@@ -66,13 +69,26 @@ class DioClient {
 }
 
 class _AuthInterceptor extends Interceptor {
-  final String authToken;
-  _AuthInterceptor({required this.authToken});
+  final String? authToken;
+  final void Function()? onUnauthorized;
+
+  _AuthInterceptor({this.authToken, this.onUnauthorized});
 
   @override
   void onRequest(RequestOptions options, RequestInterceptorHandler handler) {
-    options.headers['Authorization'] = 'Bearer $authToken';
+    final token = authToken?.trim() ?? '';
+    if (token.isNotEmpty) {
+      options.headers['Authorization'] = 'Bearer $token';
+    }
     handler.next(options);
+  }
+
+  @override
+  void onError(DioException err, ErrorInterceptorHandler handler) {
+    if (err.response?.statusCode == 401) {
+      onUnauthorized?.call();
+    }
+    handler.next(err);
   }
 }
 

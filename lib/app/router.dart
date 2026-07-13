@@ -1,3 +1,4 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../features/connection/presentation/connection_provider.dart';
@@ -10,10 +11,13 @@ import '../features/remote/presentation/remote_screen.dart';
 import '../features/settings/presentation/settings_screen.dart';
 import 'adaptive_shell.dart';
 
+final rootNavigatorKey = GlobalKey<NavigatorState>();
+
 final routerProvider = Provider<GoRouter>((ref) {
   final connectionState = ref.watch(connectionProvider);
 
   return GoRouter(
+    navigatorKey: rootNavigatorKey,
     initialLocation: '/dashboard',
     redirect: (context, state) {
       final hasConnection = connectionState.activeId != null;
