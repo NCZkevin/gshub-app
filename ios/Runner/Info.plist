@@ -32,6 +32,8 @@
 	</array>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>用于发现并连接同一局域网内的机器人设备。</string>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>用于通过蓝牙发现机器人并为机器人配置 Wi-Fi 网络。</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

@@ -11,12 +11,14 @@ class DioClient {
     required String baseUrl,
     String? authToken,
     void Function()? onUnauthorized,
+    Duration connectTimeout = const Duration(seconds: 10),
+    Duration receiveTimeout = const Duration(seconds: 15),
   }) {
     final dio = Dio(
       BaseOptions(
         baseUrl: '$baseUrl/v1/api',
-        connectTimeout: const Duration(seconds: 10),
-        receiveTimeout: const Duration(seconds: 15),
+        connectTimeout: connectTimeout,
+        receiveTimeout: receiveTimeout,
         responseType: ResponseType.json,
         contentType: 'application/json',
       ),

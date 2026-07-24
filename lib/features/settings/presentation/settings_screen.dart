@@ -125,6 +125,16 @@ class SettingsScreen extends ConsumerWidget {
           ),
           const SizedBox(height: 12),
 
+          // ─── Wi-Fi 配网 ───────────────────────────────────────
+          ConsoleCard(
+            title: 'Wi-Fi 配网',
+            icon: Icons.bluetooth_searching,
+            child: _ProvisioningWindowTile(
+              enabled: connectionState.active != null,
+            ),
+          ),
+          const SizedBox(height: 12),
+
           // ─── 主题 ─────────────────────────────────────────────
           ConsoleCard(
             title: '主题',
@@ -242,4 +252,62 @@ class SettingsScreen extends ConsumerWidget {
 
   TextStyle? _monoSubtitleStyle(BuildContext context) =>
       _subtitleStyle(context)?.copyWith(fontFamily: 'monospace');
+}
+
+class _ProvisioningWindowTile extends ConsumerStatefulWidget {
+  final bool enabled;
+  const _ProvisioningWindowTile({required this.enabled});
+
+  @override
+  ConsumerState<_ProvisioningWindowTile> createState() =>
+      _ProvisioningWindowTileState();
+}
+
+class _ProvisioningWindowTileState
+    extends ConsumerState<_ProvisioningWindowTile> {
+  var _loading = false;
+
+  Future<void> _open() async {
+    setState(() => _loading = true);
+    try {
+      final client = await ref.read(dioClientFutureProvider.future);
+      if (client == null) throw StateError('请先连接机器');
+      await client.post('/systems/provisioning/window');
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('配网窗口已打开，将持续 10 分钟')));
+      context.push('/provision');
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('无法打开配网窗口：$error')));
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      dense: true,
+      visualDensity: VisualDensity.compact,
+      contentPadding: EdgeInsets.zero,
+      minLeadingWidth: 28,
+      leading: const Icon(Icons.wifi_tethering, size: 20),
+      title: const Text('重新配置当前机器的 Wi-Fi'),
+      subtitle: Text(
+        widget.enabled ? '打开 10 分钟蓝牙配网窗口' : '离线机器会在 2 分钟后自动进入配网模式',
+      ),
+      trailing: _loading
+          ? const SizedBox(
+              width: 20,
+              height: 20,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          : const Icon(Icons.chevron_right_rounded),
+      onTap: widget.enabled && !_loading ? _open : null,
+    );
+  }
 }

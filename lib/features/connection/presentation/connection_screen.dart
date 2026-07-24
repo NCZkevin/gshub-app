@@ -298,6 +298,19 @@ class _AddConnectionDialogState extends ConsumerState<_AddConnectionDialog> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             mainAxisSize: MainAxisSize.min,
             children: [
+              FilledButton.icon(
+                onPressed: _adding
+                    ? null
+                    : () {
+                        Navigator.of(context).pop();
+                        context.push('/provision');
+                      },
+                icon: const Icon(Icons.bluetooth_searching),
+                label: const Text('通过蓝牙配置 Wi-Fi'),
+              ),
+              const SizedBox(height: 16),
+              const Divider(),
+              const SizedBox(height: 8),
               if (_scanning) const LinearProgressIndicator(),
               if (!_scanning && _devices.isEmpty)
                 const EmptyState(icon: Icons.radar, label: '未发现附近机器')

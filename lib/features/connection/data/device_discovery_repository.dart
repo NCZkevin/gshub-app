@@ -46,13 +46,18 @@ class DeviceDiscoveryRepository {
   Future<DiscoveredRobot> probe({
     required String host,
     required int port,
+    Duration timeout = const Duration(seconds: 10),
   }) async {
     final baseUrl = Uri(
       scheme: 'http',
       host: host,
       port: port,
     ).toString().replaceFirst(RegExp(r'/$'), '');
-    final client = DioClient.create(baseUrl: baseUrl);
+    final client = DioClient.create(
+      baseUrl: baseUrl,
+      connectTimeout: timeout,
+      receiveTimeout: timeout,
+    );
     final data = await client.get('/systems/device');
     if (data is! Map<String, dynamic>) {
       throw const FormatException('设备信息格式不正确');

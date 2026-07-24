@@ -128,6 +128,23 @@ class ConnectionNotifier extends Notifier<ConnectionState> {
     }
   }
 
+  Future<void> addProvisioned(DiscoveredRobot robot) async {
+    final existing = state.connections
+        .where((connection) => connection.id == robot.sn)
+        .firstOrNull;
+    final repo = ref.read(connectionRepositoryProvider);
+    await repo.save(
+      RobotConnection(
+        id: robot.sn,
+        name: existing?.name ?? robot.sn,
+        baseUrl: robot.baseUrl,
+      ),
+    );
+    state = state.copyWith(connections: repo.loadAll());
+    await activate(robot.sn);
+    ref.invalidate(dioClientFutureProvider);
+  }
+
   Future<void> activate(String id) async {
     final repo = ref.read(connectionRepositoryProvider);
     await repo.setActive(id);

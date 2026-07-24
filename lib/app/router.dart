@@ -9,6 +9,7 @@ import '../features/mapping/presentation/mapping_screen.dart';
 import '../features/logs/presentation/logs_screen.dart';
 import '../features/remote/presentation/remote_screen.dart';
 import '../features/settings/presentation/settings_screen.dart';
+import '../features/provisioning/presentation/provisioning_screen.dart';
 import 'adaptive_shell.dart';
 
 final rootNavigatorKey = GlobalKey<NavigatorState>();
@@ -21,7 +22,9 @@ final routerProvider = Provider<GoRouter>((ref) {
     initialLocation: '/dashboard',
     redirect: (context, state) {
       final hasConnection = connectionState.activeId != null;
-      final onConnection = state.matchedLocation == '/connection';
+      final onConnection =
+          state.matchedLocation == '/connection' ||
+          state.matchedLocation == '/provision';
 
       // Redirect to connection screen only if no active connection
       // and not already there. Always allow visiting /connection.
@@ -32,6 +35,10 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/connection',
         builder: (context, state) => const ConnectionScreen(),
+      ),
+      GoRoute(
+        path: '/provision',
+        builder: (context, state) => const ProvisioningScreen(),
       ),
       GoRoute(
         path: '/remote',
