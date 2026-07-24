@@ -228,7 +228,7 @@ class _RemoteScreenState extends ConsumerState<RemoteScreen> {
 
   void _applySpeedToVelocity() {
     _linearX = -_joystickY * _maxLinear * _speed.factor;
-    _linearY = _joystickX * _maxLinear * _speed.factor;
+    _linearY = -_joystickX * _maxLinear * _speed.factor;
   }
 
   void _setSpeed(_SpeedPreset speed) {
@@ -773,6 +773,8 @@ class _TranslationJoystickState extends State<_TranslationJoystick> {
     return Opacity(
       opacity: opacity,
       child: GestureDetector(
+        key: const ValueKey('remote_translation_joystick'),
+        behavior: HitTestBehavior.opaque,
         onPanStart: (details) => _update(details.localPosition),
         onPanUpdate: (details) => _update(details.localPosition),
         onPanEnd: (_) => _release(),

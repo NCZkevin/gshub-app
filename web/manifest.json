@@ -1,6 +1,6 @@
 {
-    "name": "sysapp",
-    "short_name": "sysapp",
+    "name": "Orsus hub",
+    "short_name": "Orsus hub",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",

@@ -32,6 +32,37 @@ class _FakeDashboardNotifier extends DashboardNotifier {
   }
 }
 
+class _RunningDashboardNotifier extends DashboardNotifier {
+  @override
+  Future<DashboardState> build() async {
+    return const DashboardState(
+      robotInfo: RobotInfo(robotType: 'go2', connected: true, battery: 72),
+      servicesStatus: {
+        'motion': {'status': 'running'},
+      },
+    );
+  }
+}
+
+class _RecordingWsManager extends WsConnectionManager {
+  final commands = <({double linearX, double linearY, double angularZ})>[];
+
+  @override
+  void sendCmdVel(
+    double linearX,
+    double angularZ, {
+    double linearY = 0,
+    bool force = false,
+  }) {
+    commands.add((linearX: linearX, linearY: linearY, angularZ: angularZ));
+  }
+
+  @override
+  void sendStop() {
+    sendCmdVel(0, 0, force: true);
+  }
+}
+
 void main() {
   setUp(_FakeDashboardNotifier.reset);
 
@@ -57,6 +88,70 @@ void main() {
     await tester.pump();
 
     expect(_FakeDashboardNotifier.startMotionCount, 1);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('left joystick drag sends positive lateral velocity', (
+    tester,
+  ) async {
+    final ws = _RecordingWsManager();
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          activeConnectionProvider.overrideWithValue(null),
+          wsManagerProvider.overrideWithValue(ws),
+          dashboardProvider.overrideWith(_RunningDashboardNotifier.new),
+        ],
+        child: const MaterialApp(home: RemoteScreen()),
+      ),
+    );
+    await tester.pump();
+
+    await tester.tap(find.text('解锁控制'));
+    await tester.pump();
+    expect(find.text('遥控已解锁，松手会自动停止'), findsOneWidget);
+
+    final joystick = find.byKey(const ValueKey('remote_translation_joystick'));
+    await tester.dragFrom(tester.getCenter(joystick), const Offset(-54, 0));
+    await tester.pump();
+
+    expect(
+      ws.commands.any((cmd) => cmd.linearY > 0),
+      isTrue,
+      reason: ws.commands.toString(),
+    );
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('right joystick drag sends negative lateral velocity', (
+    tester,
+  ) async {
+    final ws = _RecordingWsManager();
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          activeConnectionProvider.overrideWithValue(null),
+          wsManagerProvider.overrideWithValue(ws),
+          dashboardProvider.overrideWith(_RunningDashboardNotifier.new),
+        ],
+        child: const MaterialApp(home: RemoteScreen()),
+      ),
+    );
+    await tester.pump();
+
+    await tester.tap(find.text('解锁控制'));
+    await tester.pump();
+    expect(find.text('遥控已解锁，松手会自动停止'), findsOneWidget);
+
+    final joystick = find.byKey(const ValueKey('remote_translation_joystick'));
+    await tester.dragFrom(tester.getCenter(joystick), const Offset(54, 0));
+    await tester.pump();
+
+    expect(
+      ws.commands.any((cmd) => cmd.linearY < 0),
+      isTrue,
+      reason: ws.commands.toString(),
+    );
     expect(tester.takeException(), isNull);
   });
 }
