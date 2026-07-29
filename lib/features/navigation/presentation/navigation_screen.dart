@@ -98,13 +98,14 @@ class _NavigationSetup extends ConsumerWidget {
                 ),
                 const SizedBox(height: 16),
                 SwitchListTile(
+                  key: const Key('setup-relocalization'),
                   contentPadding: EdgeInsets.zero,
                   title: const Text('重定位模式'),
-                  subtitle: const Text('仅在需要恢复已有地图坐标时开启'),
-                  value: state.relocalization,
+                  subtitle: const Text('作为启动容器参数，用于恢复已有地图坐标'),
+                  value: state.useRelocalizationOnStart,
                   onChanged: state.loading
                       ? null
-                      : (_) => notifier.toggleRelocalization(),
+                      : notifier.setUseRelocalizationOnStart,
                 ),
                 const SizedBox(height: 20),
                 FilledButton.icon(

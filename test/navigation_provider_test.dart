@@ -46,6 +46,69 @@ void main() {
     return container;
   }
 
+  test('setup relocalization defaults to enabled', () async {
+    when(
+      () => repository.checkContainerStatus(),
+    ).thenAnswer((_) async => {'running': false, 'status': 'not_found'});
+
+    final container = createContainer();
+    final subscription = container.listen(
+      navigationProvider,
+      (_, _) {},
+      fireImmediately: true,
+    );
+    addTearDown(subscription.close);
+
+    final state = await container.read(navigationProvider.future);
+
+    expect(state.useRelocalizationOnStart, isTrue);
+  });
+
+  test(
+    'setup relocalization changes locally without a running container',
+    () async {
+      when(
+        () => repository.checkContainerStatus(),
+      ).thenAnswer((_) async => {'running': false, 'status': 'not_found'});
+      when(
+        () => repository.toggleRelocalization(any()),
+      ).thenThrow(Exception('navigation is not running'));
+      when(
+        () => repository.startNavContainer(
+          any(),
+          relocalization: any(named: 'relocalization'),
+        ),
+      ).thenAnswer((_) async {});
+
+      final container = createContainer();
+      final subscription = container.listen(
+        navigationProvider,
+        (_, _) {},
+        fireImmediately: true,
+      );
+      addTearDown(subscription.close);
+      final initial = await container.read(navigationProvider.future);
+
+      container
+          .read(navigationProvider.notifier)
+          .setUseRelocalizationOnStart(false);
+
+      final updated = container.read(navigationProvider).requireValue;
+      expect(
+        updated.useRelocalizationOnStart,
+        isNot(initial.useRelocalizationOnStart),
+      );
+      expect(updated.error, isNull);
+
+      await container.read(navigationProvider.notifier).startNavContainer();
+
+      verifyNever(() => repository.toggleRelocalization(any()));
+      verify(
+        () => repository.startNavContainer('demo_map', relocalization: false),
+      ).called(1);
+    },
+  );
+
   test(
     'start success enters active view without requiring immediate nav status',
     () async {
@@ -79,7 +142,7 @@ void main() {
       expect(state.loading, isFalse);
       expect(state.error, isNull);
       verify(
-        () => repository.startNavContainer('demo_map', relocalization: false),
+        () => repository.startNavContainer('demo_map', relocalization: true),
       ).called(1);
       verifyNever(repository.fetchNavStatus);
 

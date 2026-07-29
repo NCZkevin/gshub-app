@@ -483,6 +483,30 @@ void main() {
     manager.dispose();
   });
 
+  testWidgets('setup relocalization can change before navigation is running', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          navigationProvider.overrideWith(_SetupNavigationNotifier.new),
+        ],
+        child: const MaterialApp(home: NavigationScreen()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    SwitchListTile switchTile() => tester.widget<SwitchListTile>(
+      find.byKey(const Key('setup-relocalization')),
+    );
+
+    expect(switchTile().value, isTrue);
+    await tester.tap(find.byKey(const Key('setup-relocalization')));
+    await tester.pumpAndSettle();
+    expect(switchTile().value, isFalse);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('advanced setup params are collapsed, editable and applicable', (
     tester,
   ) async {

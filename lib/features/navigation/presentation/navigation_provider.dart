@@ -453,7 +453,7 @@ class NavigationState {
   final bool navParamsDirty;
   final String? navParamsMessage;
   final bool navReady;
-  final bool relocalization;
+  final bool useRelocalizationOnStart;
   final bool loading;
   final Set<NavigationCommand> pendingCommands;
   final String? error;
@@ -474,7 +474,7 @@ class NavigationState {
     this.navParamsDirty = false,
     this.navParamsMessage,
     this.navReady = false,
-    this.relocalization = false,
+    this.useRelocalizationOnStart = true,
     this.loading = false,
     this.pendingCommands = const {},
     this.error,
@@ -501,7 +501,7 @@ class NavigationState {
     bool? navParamsDirty,
     Object? navParamsMessage = _sentinel,
     bool? navReady,
-    bool? relocalization,
+    bool? useRelocalizationOnStart,
     bool? loading,
     Set<NavigationCommand>? pendingCommands,
     Object? error = _sentinel,
@@ -530,7 +530,8 @@ class NavigationState {
           ? this.navParamsMessage
           : navParamsMessage as String?,
       navReady: navReady ?? this.navReady,
-      relocalization: relocalization ?? this.relocalization,
+      useRelocalizationOnStart:
+          useRelocalizationOnStart ?? this.useRelocalizationOnStart,
       loading: loading ?? this.loading,
       pendingCommands: pendingCommands ?? this.pendingCommands,
       error: error == _sentinel ? this.error : error as String?,
@@ -610,7 +611,6 @@ class NavigationNotifier extends AutoDisposeAsyncNotifier<NavigationState> {
           mapMeta: mapMeta,
           navStatus: navStatus?.status ?? NavigationStatus.vacant,
           navReady: navStatus != null && selectedMap != null,
-          relocalization: navStatus?.relocalizationRaw.isNotEmpty ?? false,
           navParams: navParams,
           savedRoutes: savedRoutes,
         );
@@ -1032,7 +1032,7 @@ class NavigationNotifier extends AutoDisposeAsyncNotifier<NavigationState> {
 
       await repo.startNavContainer(
         mapName,
-        relocalization: current.relocalization,
+        relocalization: current.useRelocalizationOnStart,
       );
       if (_disposed) return;
 
@@ -1413,23 +1413,13 @@ class NavigationNotifier extends AutoDisposeAsyncNotifier<NavigationState> {
     );
   }
 
-  Future<void> toggleRelocalization() async {
+  void setUseRelocalizationOnStart(bool enabled) {
     final current = state.value;
     if (current == null) return;
 
-    final next = !current.relocalization;
-    state = AsyncValue.data(current.copyWith(relocalization: next));
-
-    try {
-      final repo = await ref.read(navigationRepositoryProvider.future);
-      await repo?.toggleRelocalization(next);
-    } catch (e) {
-      // Revert on error
-      final cur = state.value ?? current;
-      state = AsyncValue.data(
-        cur.copyWith(relocalization: !next, error: e.toString()),
-      );
-    }
+    state = AsyncValue.data(
+      current.copyWith(useRelocalizationOnStart: enabled, error: null),
+    );
   }
 }
 
