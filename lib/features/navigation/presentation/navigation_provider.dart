@@ -452,6 +452,7 @@ class NavigationState {
   final NavParamForm navParams;
   final bool navParamsDirty;
   final String? navParamsMessage;
+  final bool navReady;
   final bool relocalization;
   final bool loading;
   final Set<NavigationCommand> pendingCommands;
@@ -472,6 +473,7 @@ class NavigationState {
     this.navParams = const NavParamForm(),
     this.navParamsDirty = false,
     this.navParamsMessage,
+    this.navReady = false,
     this.relocalization = false,
     this.loading = false,
     this.pendingCommands = const {},
@@ -498,6 +500,7 @@ class NavigationState {
     NavParamForm? navParams,
     bool? navParamsDirty,
     Object? navParamsMessage = _sentinel,
+    bool? navReady,
     bool? relocalization,
     bool? loading,
     Set<NavigationCommand>? pendingCommands,
@@ -526,6 +529,7 @@ class NavigationState {
       navParamsMessage: navParamsMessage == _sentinel
           ? this.navParamsMessage
           : navParamsMessage as String?,
+      navReady: navReady ?? this.navReady,
       relocalization: relocalization ?? this.relocalization,
       loading: loading ?? this.loading,
       pendingCommands: pendingCommands ?? this.pendingCommands,
@@ -552,11 +556,15 @@ class NavigationNotifier extends AutoDisposeAsyncNotifier<NavigationState> {
   StreamSubscription<RobotOdometry>? _odoSub;
   Timer? _statusPollTimer;
   Timer? _missionPollTimer;
+  bool _disposed = false;
+  int _statusPollGeneration = 0;
   int _missionPollGeneration = 0;
 
   @override
   Future<NavigationState> build() async {
     ref.onDispose(() {
+      _disposed = true;
+      _statusPollGeneration++;
       _odoSub?.cancel();
       _statusPollTimer?.cancel();
       _missionPollTimer?.cancel();
@@ -578,7 +586,7 @@ class NavigationNotifier extends AutoDisposeAsyncNotifier<NavigationState> {
 
       if (running) {
         final maps = await repo.fetchMaps();
-        final navStatus = await repo.fetchNavStatus();
+        final navStatus = await _fetchNavStatus(repo);
         final navParams = await _fetchSavedNavParams(repo);
         final selectedMap = await _fetchCurrentMapName(repo, maps);
         final pgmBytes = selectedMap == null
@@ -601,6 +609,7 @@ class NavigationNotifier extends AutoDisposeAsyncNotifier<NavigationState> {
           pgmBytes: pgmBytes,
           mapMeta: mapMeta,
           navStatus: navStatus?.status ?? NavigationStatus.vacant,
+          navReady: navStatus != null && selectedMap != null,
           relocalization: navStatus?.relocalizationRaw.isNotEmpty ?? false,
           navParams: navParams,
           savedRoutes: savedRoutes,
@@ -644,6 +653,17 @@ class NavigationNotifier extends AutoDisposeAsyncNotifier<NavigationState> {
     }
   }
 
+  Future<NavStatus?> _fetchNavStatus(NavigationRepository repo) async {
+    try {
+      return await repo.fetchNavStatus();
+    } catch (_) {
+      // Docker running and the navigation API being ready are separate states.
+      // A transient downstream failure during container warm-up must not send
+      // the user back to the setup screen.
+      return null;
+    }
+  }
+
   Future<String?> _fetchCurrentMapName(
     NavigationRepository repo,
     List<MapInfo> maps,
@@ -656,8 +676,10 @@ class NavigationNotifier extends AutoDisposeAsyncNotifier<NavigationState> {
           entry['value'] != null) {
         return entry['value'].toString();
       }
-    } catch (_) {}
-    return maps.isNotEmpty ? maps.first.name : null;
+      return maps.isNotEmpty ? maps.first.name : null;
+    } catch (_) {
+      return null;
+    }
   }
 
   Future<List<NavLandmark>> _fetchSavedRoutes(
@@ -714,17 +736,61 @@ class NavigationNotifier extends AutoDisposeAsyncNotifier<NavigationState> {
   }
 
   void _startStatusPolling(NavigationRepository repo) {
+    if (_disposed) return;
     _statusPollTimer?.cancel();
+    final generation = ++_statusPollGeneration;
+    var requestInFlight = false;
     _statusPollTimer = Timer.periodic(const Duration(seconds: 2), (_) async {
+      if (_disposed || generation != _statusPollGeneration || requestInFlight) {
+        return;
+      }
+      requestInFlight = true;
       try {
         final navStatus = await repo.fetchNavStatus();
+        if (_disposed || generation != _statusPollGeneration) return;
+
         final current = state.value;
-        if (current != null && navStatus != null) {
-          state = AsyncValue.data(
-            current.copyWith(navStatus: navStatus.status),
+        if (current == null || navStatus == null) return;
+
+        String? resolvedMap;
+        Uint8List? resolvedPgm;
+        MapMeta? resolvedMeta;
+        List<NavLandmark>? resolvedRoutes;
+        if (current.selectedMap == null) {
+          resolvedMap = await _fetchCurrentMapName(repo, current.maps);
+          if (_disposed || generation != _statusPollGeneration) return;
+          if (resolvedMap != null) {
+            resolvedPgm = await repo.fetchMapPgm(resolvedMap);
+            resolvedMeta = _buildMapMeta(
+              mapName: resolvedMap,
+              pgmBytes: resolvedPgm,
+              maps: current.maps,
+            );
+            resolvedRoutes = await _fetchSavedRoutes(repo, resolvedMap);
+          }
+        }
+
+        if (_disposed || generation != _statusPollGeneration) return;
+        final latest = state.value;
+        if (latest == null) return;
+
+        var next = latest.copyWith(
+          navStatus: navStatus.status,
+          navReady: latest.selectedMap != null || resolvedMap != null,
+        );
+        if (latest.selectedMap == null && resolvedMap != null) {
+          next = next.copyWith(
+            selectedMap: resolvedMap,
+            pgmBytes: resolvedPgm,
+            mapMeta: resolvedMeta,
+            savedRoutes: resolvedRoutes,
           );
         }
-      } catch (_) {}
+        state = AsyncValue.data(next);
+      } catch (_) {
+      } finally {
+        requestInFlight = false;
+      }
     });
   }
 
@@ -963,18 +1029,19 @@ class NavigationNotifier extends AutoDisposeAsyncNotifier<NavigationState> {
         mapName,
         relocalization: current.relocalization,
       );
+      if (_disposed) return;
 
-      // Wait briefly then check status
-      await Future<void>.delayed(const Duration(seconds: 1));
-      final navStatus = await repo.fetchNavStatus();
       final savedRoutes = await _fetchSavedRoutes(repo, mapName);
+      if (_disposed) return;
 
       state = AsyncValue.data(
         current.copyWith(
           viewState: NavViewState.active,
-          navStatus: navStatus?.status ?? NavigationStatus.vacant,
+          navStatus: NavigationStatus.vacant,
+          navReady: false,
           savedRoutes: savedRoutes,
           loading: false,
+          error: null,
         ),
       );
       _startStatusPolling(repo);

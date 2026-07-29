@@ -36,6 +36,7 @@ class _FakeNavigationNotifier extends NavigationNotifier {
   static int closeNavigationCount = 0;
   static int submitRelocalizationCount = 0;
   static int startSavedRouteCount = 0;
+  static bool navReady = true;
 
   static void reset() {
     startMissionCount = 0;
@@ -43,12 +44,14 @@ class _FakeNavigationNotifier extends NavigationNotifier {
     closeNavigationCount = 0;
     submitRelocalizationCount = 0;
     startSavedRouteCount = 0;
+    navReady = true;
   }
 
   @override
   Future<NavigationState> build() async {
     return NavigationState(
       viewState: NavViewState.active,
+      navReady: navReady,
       selectedMap: 'demo_map',
       savedRoutes: const [
         NavLandmark(
@@ -207,6 +210,21 @@ void main() {
     expect(find.byKey(const Key('navigation-side-panel')), findsOneWidget);
     expect(find.byKey(const Key('navigation-task-sheet')), findsNothing);
     expect(tester.takeException(), isNull);
+    manager.dispose();
+  });
+
+  testWidgets('warming navigation disables mission editing and shows status', (
+    tester,
+  ) async {
+    _FakeNavigationNotifier.navReady = false;
+    final manager = await _pumpNavigation(tester);
+
+    expect(find.text('启动中'), findsOneWidget);
+    expect(find.text('导航服务启动中'), findsOneWidget);
+    final pickGoal = tester.widget<OutlinedButton>(
+      find.byKey(const Key('pick-single-goal')),
+    );
+    expect(pickGoal.onPressed, isNull);
     manager.dispose();
   });
 

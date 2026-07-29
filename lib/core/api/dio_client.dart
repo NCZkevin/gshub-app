@@ -100,30 +100,21 @@ class _EnvelopeInterceptor extends Interceptor {
     Response<dynamic> response,
     ResponseInterceptorHandler handler,
   ) {
-    var data = response.data;
-
-    // If Dio didn't auto-parse JSON (missing/wrong Content-Type), do it manually
-    if (data is String && data.isNotEmpty) {
-      try {
-        data = jsonDecode(data);
-      } catch (_) {
-        // Not JSON — pass through as-is
-        handler.next(response);
-        return;
-      }
-    }
+    final data = _decodeJson(response.data);
 
     if (data is Map<String, dynamic> && data.containsKey('code')) {
       final code = data['code'] as int? ?? 0;
       if (code != 0) {
+        final apiError = ApiException(
+          code: code,
+          message: data['msg'] as String? ?? 'API error',
+        );
         handler.reject(
           DioException(
             requestOptions: response.requestOptions,
             response: response,
-            error: ApiException(
-              code: code,
-              message: data['msg'] as String? ?? 'API error',
-            ),
+            error: apiError,
+            message: apiError.message,
           ),
         );
         return;
@@ -137,6 +128,27 @@ class _EnvelopeInterceptor extends Interceptor {
 
   @override
   void onError(DioException err, ErrorInterceptorHandler handler) {
+    final data = _decodeJson(err.response?.data);
+    if (data is Map<String, dynamic>) {
+      final code = data['code'];
+      if (code is int && code != 0) {
+        final apiError = ApiException(
+          code: code,
+          message: data['msg'] as String? ?? 'API error',
+        );
+        handler.next(err.copyWith(error: apiError, message: apiError.message));
+        return;
+      }
+    }
     handler.next(err);
+  }
+}
+
+dynamic _decodeJson(dynamic data) {
+  if (data is! String || data.isEmpty) return data;
+  try {
+    return jsonDecode(data);
+  } catch (_) {
+    return data;
   }
 }

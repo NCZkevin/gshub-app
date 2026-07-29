@@ -231,8 +231,12 @@ class _NavigationWorkspaceState extends ConsumerState<NavigationWorkspace> {
                   ),
                   const SizedBox(width: 8),
                   StatusPill(
-                    label: _statusLabel(state.navStatus),
-                    color: _statusColor(state.navStatus),
+                    label: state.navReady
+                        ? _statusLabel(state.navStatus)
+                        : '启动中',
+                    color: state.navReady
+                        ? _statusColor(state.navStatus)
+                        : AppTheme.warning,
                   ),
                 ],
               ),
@@ -446,7 +450,9 @@ class _NavigationWorkspaceState extends ConsumerState<NavigationWorkspace> {
               ),
               Text(
                 state.activeMission == null
-                    ? _statusLabel(state.navStatus)
+                    ? state.navReady
+                          ? _statusLabel(state.navStatus)
+                          : '导航服务启动中'
                     : '${state.activeMission?.mode ?? 'mission'} · '
                           '${state.activeMission?.status}',
                 overflow: TextOverflow.ellipsis,
@@ -1006,6 +1012,7 @@ class _NavigationWorkspaceState extends ConsumerState<NavigationWorkspace> {
   }
 
   bool get _missionSubmitDisabled =>
+      !widget.navState.navReady ||
       widget.navState.activeMission?.isActive == true ||
       widget.navState.isPending(NavigationCommand.submitMission);
 
