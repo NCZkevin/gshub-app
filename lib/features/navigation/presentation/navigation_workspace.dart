@@ -231,12 +231,8 @@ class _NavigationWorkspaceState extends ConsumerState<NavigationWorkspace> {
                   ),
                   const SizedBox(width: 8),
                   StatusPill(
-                    label: state.navReady
-                        ? _statusLabel(state.navStatus)
-                        : '启动中',
-                    color: state.navReady
-                        ? _statusColor(state.navStatus)
-                        : AppTheme.warning,
+                    label: _runtimeStatusLabel(state),
+                    color: _runtimeStatusColor(state),
                   ),
                 ],
               ),
@@ -450,11 +446,9 @@ class _NavigationWorkspaceState extends ConsumerState<NavigationWorkspace> {
               ),
               Text(
                 state.activeMission == null
-                    ? state.navReady
-                          ? _statusLabel(state.navStatus)
-                          : '导航服务启动中'
+                    ? _taskStatusLabel(state)
                     : '${state.activeMission?.mode ?? 'mission'} · '
-                          '${state.activeMission?.status}',
+                          '${_missionStatusLabel(state.activeMission!.status)}',
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(color: Colors.white60, fontSize: 11),
               ),
@@ -1698,6 +1692,17 @@ Color _statusColor(NavigationStatus status) => switch (status) {
   NavigationStatus.vacant => AppTheme.slate400,
 };
 
+Color _runtimeStatusColor(NavigationState state) {
+  if (!state.navReady) return AppTheme.warning;
+  return switch (state.navStatus) {
+    NavigationStatus.failed ||
+    NavigationStatus.navigating ||
+    NavigationStatus.paused ||
+    NavigationStatus.arrived => _statusColor(state.navStatus),
+    NavigationStatus.stopped || NavigationStatus.vacant => AppTheme.success,
+  };
+}
+
 String _statusLabel(NavigationStatus status) => switch (status) {
   NavigationStatus.navigating => '导航中',
   NavigationStatus.arrived => '已到达',
@@ -1705,4 +1710,35 @@ String _statusLabel(NavigationStatus status) => switch (status) {
   NavigationStatus.paused => '已暂停',
   NavigationStatus.stopped => '已停止',
   NavigationStatus.vacant => '空闲',
+};
+
+String _taskStatusLabel(NavigationState state) {
+  if (!state.navReady) return '导航服务启动中';
+  return switch (state.navStatus) {
+    NavigationStatus.stopped || NavigationStatus.vacant => '空闲',
+    _ => _statusLabel(state.navStatus),
+  };
+}
+
+String _runtimeStatusLabel(NavigationState state) {
+  if (!state.navReady) return '导航服务启动中';
+  return switch (state.navStatus) {
+    NavigationStatus.failed ||
+    NavigationStatus.navigating ||
+    NavigationStatus.paused ||
+    NavigationStatus.arrived => _statusLabel(state.navStatus),
+    NavigationStatus.stopped || NavigationStatus.vacant => '导航运行中',
+  };
+}
+
+String _missionStatusLabel(String status) => switch (status) {
+  'pending' => '排队中',
+  'running' || 'active' => '执行中',
+  'paused' => '已暂停',
+  'completed' || 'succeeded' || 'success' => '已完成',
+  'failed' || 'error' => '失败',
+  'cancelled' || 'canceled' => '已取消',
+  'stopping' => '停止中',
+  'stopped' => '已停止',
+  _ => status,
 };

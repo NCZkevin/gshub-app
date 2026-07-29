@@ -37,6 +37,8 @@ class _FakeNavigationNotifier extends NavigationNotifier {
   static int submitRelocalizationCount = 0;
   static int startSavedRouteCount = 0;
   static bool navReady = true;
+  static NavigationStatus navStatus = NavigationStatus.vacant;
+  static MissionInfo? activeMission;
 
   static void reset() {
     startMissionCount = 0;
@@ -45,6 +47,8 @@ class _FakeNavigationNotifier extends NavigationNotifier {
     submitRelocalizationCount = 0;
     startSavedRouteCount = 0;
     navReady = true;
+    navStatus = NavigationStatus.vacant;
+    activeMission = null;
   }
 
   @override
@@ -52,6 +56,8 @@ class _FakeNavigationNotifier extends NavigationNotifier {
     return NavigationState(
       viewState: NavViewState.active,
       navReady: navReady,
+      navStatus: navStatus,
+      activeMission: activeMission,
       selectedMap: 'demo_map',
       savedRoutes: const [
         NavLandmark(
@@ -219,12 +225,56 @@ void main() {
     _FakeNavigationNotifier.navReady = false;
     final manager = await _pumpNavigation(tester);
 
-    expect(find.text('启动中'), findsOneWidget);
-    expect(find.text('导航服务启动中'), findsOneWidget);
+    expect(find.text('导航服务启动中'), findsNWidgets(2));
     final pickGoal = tester.widget<OutlinedButton>(
       find.byKey(const Key('pick-single-goal')),
     );
     expect(pickGoal.onPressed, isNull);
+    manager.dispose();
+  });
+
+  testWidgets(
+    'ready runtime is not presented as a stopped navigation service',
+    (tester) async {
+      _FakeNavigationNotifier.navStatus = NavigationStatus.stopped;
+      final manager = await _pumpNavigation(tester);
+
+      expect(find.text('导航运行中'), findsOneWidget);
+      expect(find.text('空闲'), findsOneWidget);
+      expect(find.text('已停止'), findsNothing);
+      manager.dispose();
+    },
+  );
+
+  testWidgets('stopped mission remains visible as a task result', (
+    tester,
+  ) async {
+    _FakeNavigationNotifier.navStatus = NavigationStatus.stopped;
+    _FakeNavigationNotifier.activeMission = const MissionInfo(
+      id: 'mission-1',
+      status: 'stopped',
+      mode: 'standard',
+    );
+    final manager = await _pumpNavigation(tester);
+
+    expect(find.text('导航运行中'), findsOneWidget);
+    expect(find.text('standard · 已停止'), findsOneWidget);
+    manager.dispose();
+  });
+
+  testWidgets('stopping mission is localized as an in-progress task', (
+    tester,
+  ) async {
+    _FakeNavigationNotifier.navStatus = NavigationStatus.navigating;
+    _FakeNavigationNotifier.activeMission = const MissionInfo(
+      id: 'mission-1',
+      status: 'stopping',
+      mode: 'standard',
+    );
+    final manager = await _pumpNavigation(tester);
+
+    expect(find.text('导航中'), findsOneWidget);
+    expect(find.text('standard · 停止中'), findsOneWidget);
     manager.dispose();
   });
 

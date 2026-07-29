@@ -253,4 +253,63 @@ void main() {
     await Future<void>.delayed(const Duration(milliseconds: 2100));
     verify(repository.fetchNavStatus).called(1);
   });
+
+  test(
+    'runtime polling cannot overwrite an active mission with stopped',
+    () async {
+      when(
+        () => repository.checkContainerStatus(),
+      ).thenAnswer((_) async => {'running': true, 'status': 'running'});
+
+      var statusCalls = 0;
+      when(() => repository.fetchNavStatus()).thenAnswer((_) async {
+        statusCalls++;
+        if (statusCalls == 1) {
+          return const NavStatus(status: NavigationStatus.vacant);
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 150));
+        return const NavStatus(status: NavigationStatus.stopped);
+      });
+      when(() => repository.createMission(any())).thenAnswer(
+        (_) async => {
+          'mission_id': 'mission-1',
+          'status': 'running',
+          'mode': 'standard',
+        },
+      );
+      when(() => repository.fetchMission('mission-1')).thenAnswer(
+        (_) async => {
+          'mission_id': 'mission-1',
+          'status': 'running',
+          'mode': 'standard',
+        },
+      );
+
+      final container = createContainer();
+      final subscription = container.listen(
+        navigationProvider,
+        (_, _) {},
+        fireImmediately: true,
+      );
+      addTearDown(subscription.close);
+      await container.read(navigationProvider.future);
+
+      await container
+          .read(navigationProvider.notifier)
+          .startSingleMission(
+            mode: SingleMissionMode.standard,
+            goal: const Waypoint(x: 1, y: 2),
+          );
+      expect(
+        container.read(navigationProvider).requireValue.navStatus,
+        NavigationStatus.navigating,
+      );
+
+      await Future<void>.delayed(const Duration(milliseconds: 2300));
+
+      final state = container.read(navigationProvider).requireValue;
+      expect(state.activeMission?.status, 'running');
+      expect(state.navStatus, NavigationStatus.navigating);
+    },
+  );
 }

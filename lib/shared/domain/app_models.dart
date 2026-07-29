@@ -109,9 +109,10 @@ class NavStatus {
       case 'paused':
         status = NavigationStatus.paused;
         break;
-      case 'stopped':
       case 'idle':
-        status = NavigationStatus.stopped;
+      case 'stop':
+      case 'stopped':
+        status = NavigationStatus.vacant;
         break;
       default:
         status = NavigationStatus.vacant;

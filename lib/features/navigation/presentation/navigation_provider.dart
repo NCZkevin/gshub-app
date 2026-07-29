@@ -774,8 +774,12 @@ class NavigationNotifier extends AutoDisposeAsyncNotifier<NavigationState> {
         final latest = state.value;
         if (latest == null) return;
 
+        final mission = latest.activeMission;
+        final effectiveStatus = mission == null
+            ? navStatus.status
+            : _statusFromMission(mission.status, navStatus.status);
         var next = latest.copyWith(
-          navStatus: navStatus.status,
+          navStatus: effectiveStatus,
           navReady: latest.selectedMap != null || resolvedMap != null,
         );
         if (latest.selectedMap == null && resolvedMap != null) {
@@ -861,6 +865,7 @@ class NavigationNotifier extends AutoDisposeAsyncNotifier<NavigationState> {
       case 'pending':
       case 'running':
       case 'active':
+      case 'stopping':
         if (fallback == NavigationStatus.paused) {
           return NavigationStatus.paused;
         }
