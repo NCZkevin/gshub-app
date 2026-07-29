@@ -16,6 +16,19 @@ enum NavMode { singlePoint, path, record, relocalize, savedRoute }
 
 enum SingleMissionMode { standard, direct }
 
+enum NavigationCommand {
+  startContainer,
+  applyParams,
+  submitMission,
+  relocalize,
+  pause,
+  resume,
+  stop,
+  close,
+  saveRoute,
+  refreshRoutes,
+}
+
 enum NavParamField {
   lidarHeight,
   freeMinObstacleHeight,
@@ -433,19 +446,15 @@ class NavigationState {
   final RobotOdometry? robotPose;
   final List<RobotOdometry> trajectory;
   final NavigationStatus navStatus;
-  final NavMode navMode;
-  final SingleMissionMode singleMissionMode;
   final MissionInfo? activeMission;
-  final (double x, double y, double theta)? goalPoint;
-  final (double x, double y, double theta)? relocalizationPose;
   final List<NavLandmark> savedRoutes;
-  final List<Waypoint> waypoints;
   final List<(double x, double y)> plannedPath;
   final NavParamForm navParams;
   final bool navParamsDirty;
   final String? navParamsMessage;
   final bool relocalization;
   final bool loading;
+  final Set<NavigationCommand> pendingCommands;
   final String? error;
 
   const NavigationState({
@@ -457,21 +466,22 @@ class NavigationState {
     this.robotPose,
     this.trajectory = const [],
     this.navStatus = NavigationStatus.vacant,
-    this.navMode = NavMode.singlePoint,
-    this.singleMissionMode = SingleMissionMode.standard,
     this.activeMission,
-    this.goalPoint,
-    this.relocalizationPose,
     this.savedRoutes = const [],
-    this.waypoints = const [],
     this.plannedPath = const [],
     this.navParams = const NavParamForm(),
     this.navParamsDirty = false,
     this.navParamsMessage,
     this.relocalization = false,
     this.loading = false,
+    this.pendingCommands = const {},
     this.error,
   });
+
+  bool isPending(NavigationCommand command) =>
+      pendingCommands.contains(command);
+
+  bool get hasPendingCommand => pendingCommands.isNotEmpty;
 
   NavigationState copyWith({
     NavViewState? viewState,
@@ -482,19 +492,15 @@ class NavigationState {
     Object? robotPose = _sentinel,
     List<RobotOdometry>? trajectory,
     NavigationStatus? navStatus,
-    NavMode? navMode,
-    SingleMissionMode? singleMissionMode,
     Object? activeMission = _sentinel,
-    Object? goalPoint = _sentinel,
-    Object? relocalizationPose = _sentinel,
     List<NavLandmark>? savedRoutes,
-    List<Waypoint>? waypoints,
     List<(double, double)>? plannedPath,
     NavParamForm? navParams,
     bool? navParamsDirty,
     Object? navParamsMessage = _sentinel,
     bool? relocalization,
     bool? loading,
+    Set<NavigationCommand>? pendingCommands,
     Object? error = _sentinel,
   }) {
     return NavigationState(
@@ -510,19 +516,10 @@ class NavigationState {
           : robotPose as RobotOdometry?,
       trajectory: trajectory ?? this.trajectory,
       navStatus: navStatus ?? this.navStatus,
-      navMode: navMode ?? this.navMode,
-      singleMissionMode: singleMissionMode ?? this.singleMissionMode,
       activeMission: activeMission == _sentinel
           ? this.activeMission
           : activeMission as MissionInfo?,
-      goalPoint: goalPoint == _sentinel
-          ? this.goalPoint
-          : goalPoint as (double, double, double)?,
-      relocalizationPose: relocalizationPose == _sentinel
-          ? this.relocalizationPose
-          : relocalizationPose as (double, double, double)?,
       savedRoutes: savedRoutes ?? this.savedRoutes,
-      waypoints: waypoints ?? this.waypoints,
       plannedPath: plannedPath ?? this.plannedPath,
       navParams: navParams ?? this.navParams,
       navParamsDirty: navParamsDirty ?? this.navParamsDirty,
@@ -531,6 +528,7 @@ class NavigationState {
           : navParamsMessage as String?,
       relocalization: relocalization ?? this.relocalization,
       loading: loading ?? this.loading,
+      pendingCommands: pendingCommands ?? this.pendingCommands,
       error: error == _sentinel ? this.error : error as String?,
     );
   }
@@ -554,6 +552,7 @@ class NavigationNotifier extends AutoDisposeAsyncNotifier<NavigationState> {
   StreamSubscription<RobotOdometry>? _odoSub;
   Timer? _statusPollTimer;
   Timer? _missionPollTimer;
+  int _missionPollGeneration = 0;
 
   @override
   Future<NavigationState> build() async {
@@ -730,25 +729,62 @@ class NavigationNotifier extends AutoDisposeAsyncNotifier<NavigationState> {
   }
 
   void _startMissionPolling(NavigationRepository repo, String missionId) {
-    _missionPollTimer?.cancel();
+    _cancelMissionPolling();
+    final generation = _missionPollGeneration;
+    var requestInFlight = false;
     _missionPollTimer = Timer.periodic(const Duration(seconds: 1), (_) async {
+      if (requestInFlight) return;
+      requestInFlight = true;
       try {
         final mission = MissionInfo.fromJson(
           await repo.fetchMission(missionId),
         );
+        List<(double, double)>? plannedPath;
+        if (mission.isActive) {
+          try {
+            plannedPath = await repo.fetchPlanPath();
+          } catch (_) {}
+        }
+        if (generation != _missionPollGeneration) return;
         final current = state.value;
-        if (current == null) return;
+        if (current == null ||
+            (current.activeMission?.id.isNotEmpty == true &&
+                current.activeMission?.id != missionId)) {
+          return;
+        }
         state = AsyncValue.data(
           current.copyWith(
             activeMission: mission.id.isEmpty ? current.activeMission : mission,
             navStatus: _statusFromMission(mission.status, current.navStatus),
+            plannedPath: plannedPath ?? current.plannedPath,
           ),
         );
         if (!mission.isActive) {
-          _missionPollTimer?.cancel();
+          _cancelMissionPolling();
         }
-      } catch (_) {}
+      } catch (_) {
+      } finally {
+        requestInFlight = false;
+      }
     });
+  }
+
+  void _cancelMissionPolling() {
+    _missionPollGeneration++;
+    _missionPollTimer?.cancel();
+    _missionPollTimer = null;
+  }
+
+  void _setCommandPending(NavigationCommand command, bool pending) {
+    final current = state.value;
+    if (current == null) return;
+    final next = {...current.pendingCommands};
+    if (pending) {
+      next.add(command);
+    } else {
+      next.remove(command);
+    }
+    state = AsyncValue.data(current.copyWith(pendingCommands: next));
   }
 
   NavigationStatus _statusFromMission(
@@ -952,127 +988,97 @@ class NavigationNotifier extends AutoDisposeAsyncNotifier<NavigationState> {
 
   // ─── Navigation control ────────────────────────────────────
 
-  void setGoalPoint(double wx, double wy, {double? theta}) {
+  Future<void> submitRelocalizationPose(Waypoint pose) async {
     final current = state.value;
-    if (current == null) return;
-
-    state = AsyncValue.data(
-      current.copyWith(
-        goalPoint: (wx, wy, theta ?? current.goalPoint?.$3 ?? 0.0),
-        plannedPath: [],
-        error: null,
-      ),
-    );
-  }
-
-  void setRelocalizationPose(double wx, double wy, {double? theta}) {
-    final current = state.value;
-    if (current == null) return;
-
-    state = AsyncValue.data(
-      current.copyWith(
-        relocalizationPose: (
-          wx,
-          wy,
-          theta ?? current.relocalizationPose?.$3 ?? 0.0,
-        ),
-        error: null,
-      ),
-    );
-  }
-
-  Future<void> submitRelocalizationPose() async {
-    final current = state.value;
-    final pose = current?.relocalizationPose;
-    if (current == null || pose == null) return;
-
-    state = AsyncValue.data(current.copyWith(loading: true, error: null));
-
-    try {
-      final repo = await ref.read(navigationRepositoryProvider.future);
-      if (repo == null) return;
-      await repo.setRelocalizationPose(pose.$1, pose.$2, pose.$3);
-      final cur = state.value ?? current;
-      state = AsyncValue.data(
-        cur.copyWith(loading: false, navParamsMessage: '初始位姿已提交'),
-      );
-    } catch (e) {
-      final cur = state.value ?? current;
-      state = AsyncValue.data(
-        cur.copyWith(loading: false, error: e.toString()),
-      );
-    }
-  }
-
-  void setSingleMissionMode(SingleMissionMode mode) {
-    final current = state.value;
-    if (current == null) return;
-    state = AsyncValue.data(current.copyWith(singleMissionMode: mode));
-  }
-
-  Future<void> startSingleMission() async {
-    final current = state.value;
-    final goal = current?.goalPoint;
-    if (current == null ||
-        goal == null ||
-        current.activeMission?.isActive == true) {
+    if (current == null || current.isPending(NavigationCommand.relocalize)) {
       return;
     }
 
-    state = AsyncValue.data(current.copyWith(loading: true, error: null));
+    _setCommandPending(NavigationCommand.relocalize, true);
+    try {
+      final repo = await ref.read(navigationRepositoryProvider.future);
+      if (repo == null) return;
+      await repo.setRelocalizationPose(pose.x, pose.y, pose.theta);
+      final cur = state.value;
+      if (cur != null) {
+        state = AsyncValue.data(
+          cur.copyWith(navParamsMessage: '初始位姿已提交', error: null),
+        );
+      }
+    } catch (e) {
+      final cur = state.value;
+      if (cur != null) {
+        state = AsyncValue.data(cur.copyWith(error: e.toString()));
+      }
+    } finally {
+      _setCommandPending(NavigationCommand.relocalize, false);
+    }
+  }
 
+  Future<void> startSingleMission({
+    required SingleMissionMode mode,
+    required Waypoint goal,
+  }) async {
+    final current = state.value;
+    if (current == null ||
+        current.activeMission?.isActive == true ||
+        current.isPending(NavigationCommand.submitMission)) {
+      return;
+    }
+
+    _setCommandPending(NavigationCommand.submitMission, true);
     try {
       final repo = await ref.read(navigationRepositoryProvider.future);
       if (repo == null) return;
 
-      final mode = current.singleMissionMode == SingleMissionMode.direct
-          ? 'direct'
-          : 'standard';
       final mission = MissionInfo.fromJson(
         await repo.createMission({
-          'mode': mode,
+          'mode': mode == SingleMissionMode.direct ? 'direct' : 'standard',
           'frame_id': 'map',
-          'target': {'x': goal.$1, 'y': goal.$2, 'theta': goal.$3},
+          'target': {'x': goal.x, 'y': goal.y, 'theta': goal.theta},
         }),
       );
 
-      final cur = state.value ?? current;
-      state = AsyncValue.data(
-        cur.copyWith(
-          loading: false,
-          activeMission: mission,
-          navStatus: _statusFromMission(
-            mission.status,
-            NavigationStatus.navigating,
+      final cur = state.value;
+      if (cur != null) {
+        state = AsyncValue.data(
+          cur.copyWith(
+            activeMission: mission,
+            navStatus: _statusFromMission(
+              mission.status,
+              NavigationStatus.navigating,
+            ),
+            plannedPath: const [],
+            error: null,
           ),
-        ),
-      );
+        );
+      }
       if (mission.id.isNotEmpty) {
         _startMissionPolling(repo, mission.id);
       }
     } catch (e) {
-      final cur = state.value ?? current;
-      state = AsyncValue.data(
-        cur.copyWith(loading: false, error: e.toString()),
-      );
+      final cur = state.value;
+      if (cur != null) {
+        state = AsyncValue.data(cur.copyWith(error: e.toString()));
+      }
+    } finally {
+      _setCommandPending(NavigationCommand.submitMission, false);
     }
   }
 
-  Future<void> navigateTo(double wx, double wy) async {
-    setGoalPoint(wx, wy);
-    await startSingleMission();
-  }
-
-  Future<void> startPathNav(int cycles) async {
+  Future<void> startPathNav({
+    required List<Waypoint> waypoints,
+    required int cycles,
+  }) async {
     final current = state.value;
     if (current == null ||
-        current.waypoints.isEmpty ||
-        current.activeMission?.isActive == true) {
+        waypoints.isEmpty ||
+        current.activeMission?.isActive == true ||
+        current.isPending(NavigationCommand.submitMission)) {
       return;
     }
 
-    state = AsyncValue.data(current.copyWith(loading: true, error: null));
-
+    _setCommandPending(NavigationCommand.submitMission, true);
     try {
       final repo = await ref.read(navigationRepositoryProvider.future);
       if (repo == null) return;
@@ -1081,32 +1087,37 @@ class NavigationNotifier extends AutoDisposeAsyncNotifier<NavigationState> {
         await repo.createMission({
           'mode': 'route',
           'frame_id': 'map',
-          'waypoints': current.waypoints
+          'waypoints': waypoints
               .map((w) => {'x': w.x, 'y': w.y, 'theta': w.theta})
               .toList(),
-          'cycles': cycles,
+          'cycles': cycles.clamp(1, 999),
         }),
       );
 
-      final cur = state.value ?? current;
-      state = AsyncValue.data(
-        cur.copyWith(
-          loading: false,
-          activeMission: mission,
-          navStatus: _statusFromMission(
-            mission.status,
-            NavigationStatus.navigating,
+      final cur = state.value;
+      if (cur != null) {
+        state = AsyncValue.data(
+          cur.copyWith(
+            activeMission: mission,
+            navStatus: _statusFromMission(
+              mission.status,
+              NavigationStatus.navigating,
+            ),
+            plannedPath: const [],
+            error: null,
           ),
-        ),
-      );
+        );
+      }
       if (mission.id.isNotEmpty) {
         _startMissionPolling(repo, mission.id);
       }
     } catch (e) {
-      final cur = state.value ?? current;
-      state = AsyncValue.data(
-        cur.copyWith(loading: false, error: e.toString()),
-      );
+      final cur = state.value;
+      if (cur != null) {
+        state = AsyncValue.data(cur.copyWith(error: e.toString()));
+      }
+    } finally {
+      _setCommandPending(NavigationCommand.submitMission, false);
     }
   }
 
@@ -1115,41 +1126,29 @@ class NavigationNotifier extends AutoDisposeAsyncNotifier<NavigationState> {
     final sceneName = current?.selectedMap;
     if (current == null || sceneName == null) return;
 
-    state = AsyncValue.data(current.copyWith(loading: true, error: null));
+    if (current.isPending(NavigationCommand.refreshRoutes)) return;
+    _setCommandPending(NavigationCommand.refreshRoutes, true);
 
     try {
       final repo = await ref.read(navigationRepositoryProvider.future);
       if (repo == null) return;
       final routes = await _fetchSavedRoutes(repo, sceneName);
       final cur = state.value ?? current;
-      state = AsyncValue.data(
-        cur.copyWith(savedRoutes: routes, loading: false),
-      );
+      state = AsyncValue.data(cur.copyWith(savedRoutes: routes, error: null));
     } catch (e) {
       final cur = state.value ?? current;
-      state = AsyncValue.data(
-        cur.copyWith(loading: false, error: e.toString()),
-      );
+      state = AsyncValue.data(cur.copyWith(error: e.toString()));
+    } finally {
+      _setCommandPending(NavigationCommand.refreshRoutes, false);
     }
-  }
-
-  void loadSavedRoute(NavLandmark route) {
-    final current = state.value;
-    if (current == null) return;
-    state = AsyncValue.data(
-      current.copyWith(
-        navMode: NavMode.path,
-        waypoints: route.points,
-        error: null,
-      ),
-    );
   }
 
   Future<void> startSavedRoute(NavLandmark route, int cycles) async {
     final current = state.value;
     if (current == null || current.activeMission?.isActive == true) return;
 
-    state = AsyncValue.data(current.copyWith(loading: true, error: null));
+    if (current.isPending(NavigationCommand.submitMission)) return;
+    _setCommandPending(NavigationCommand.submitMission, true);
 
     try {
       final repo = await ref.read(navigationRepositoryProvider.future);
@@ -1159,7 +1158,6 @@ class NavigationNotifier extends AutoDisposeAsyncNotifier<NavigationState> {
       final cur = state.value ?? current;
       state = AsyncValue.data(
         cur.copyWith(
-          loading: false,
           activeMission: mission.id.isEmpty ? cur.activeMission : mission,
           navStatus: mission.id.isEmpty
               ? NavigationStatus.navigating
@@ -1171,23 +1169,27 @@ class NavigationNotifier extends AutoDisposeAsyncNotifier<NavigationState> {
       }
     } catch (e) {
       final cur = state.value ?? current;
-      state = AsyncValue.data(
-        cur.copyWith(loading: false, error: e.toString()),
-      );
+      state = AsyncValue.data(cur.copyWith(error: e.toString()));
+    } finally {
+      _setCommandPending(NavigationCommand.submitMission, false);
     }
   }
 
-  Future<void> saveCurrentRoute(String name) async {
+  Future<void> saveCurrentRoute({
+    required String name,
+    required List<Waypoint> points,
+  }) async {
     final current = state.value;
     final sceneName = current?.selectedMap;
     if (current == null ||
         sceneName == null ||
         name.trim().isEmpty ||
-        current.waypoints.length < 2) {
+        points.length < 2 ||
+        current.isPending(NavigationCommand.saveRoute)) {
       return;
     }
 
-    state = AsyncValue.data(current.copyWith(loading: true, error: null));
+    _setCommandPending(NavigationCommand.saveRoute, true);
 
     try {
       final repo = await ref.read(navigationRepositoryProvider.future);
@@ -1196,22 +1198,23 @@ class NavigationNotifier extends AutoDisposeAsyncNotifier<NavigationState> {
         name: name.trim(),
         sceneName: sceneName,
         kind: 'route',
-        points: current.waypoints,
+        points: points,
       );
       final routes = await _fetchSavedRoutes(repo, sceneName);
       final cur = state.value ?? current;
-      state = AsyncValue.data(
-        cur.copyWith(savedRoutes: routes, loading: false),
-      );
+      state = AsyncValue.data(cur.copyWith(savedRoutes: routes, error: null));
     } catch (e) {
       final cur = state.value ?? current;
-      state = AsyncValue.data(
-        cur.copyWith(loading: false, error: e.toString()),
-      );
+      state = AsyncValue.data(cur.copyWith(error: e.toString()));
+    } finally {
+      _setCommandPending(NavigationCommand.saveRoute, false);
     }
   }
 
   Future<void> pause() async {
+    final current = state.value;
+    if (current == null || current.isPending(NavigationCommand.pause)) return;
+    _setCommandPending(NavigationCommand.pause, true);
     try {
       final repo = await ref.read(navigationRepositoryProvider.future);
       await repo?.pauseNav();
@@ -1226,10 +1229,15 @@ class NavigationNotifier extends AutoDisposeAsyncNotifier<NavigationState> {
       if (cur != null) {
         state = AsyncValue.data(cur.copyWith(error: e.toString()));
       }
+    } finally {
+      _setCommandPending(NavigationCommand.pause, false);
     }
   }
 
   Future<void> resume() async {
+    final current = state.value;
+    if (current == null || current.isPending(NavigationCommand.resume)) return;
+    _setCommandPending(NavigationCommand.resume, true);
     try {
       final repo = await ref.read(navigationRepositoryProvider.future);
       await repo?.resumeNav();
@@ -1244,6 +1252,8 @@ class NavigationNotifier extends AutoDisposeAsyncNotifier<NavigationState> {
       if (cur != null) {
         state = AsyncValue.data(cur.copyWith(error: e.toString()));
       }
+    } finally {
+      _setCommandPending(NavigationCommand.resume, false);
     }
   }
 
@@ -1251,6 +1261,8 @@ class NavigationNotifier extends AutoDisposeAsyncNotifier<NavigationState> {
     final current = state.value;
     if (current == null) return;
 
+    if (current.isPending(NavigationCommand.stop)) return;
+    _setCommandPending(NavigationCommand.stop, true);
     try {
       final repo = await ref.read(navigationRepositoryProvider.future);
       if (repo == null) return;
@@ -1262,10 +1274,11 @@ class NavigationNotifier extends AutoDisposeAsyncNotifier<NavigationState> {
         await repo.stopNavigating();
       }
 
-      _missionPollTimer?.cancel();
+      _cancelMissionPolling();
 
+      final cur = state.value ?? current;
       state = AsyncValue.data(
-        current.copyWith(
+        cur.copyWith(
           navStatus: NavigationStatus.stopped,
           activeMission: null,
           plannedPath: [],
@@ -1274,6 +1287,8 @@ class NavigationNotifier extends AutoDisposeAsyncNotifier<NavigationState> {
     } catch (e) {
       final cur = state.value ?? current;
       state = AsyncValue.data(cur.copyWith(error: e.toString()));
+    } finally {
+      _setCommandPending(NavigationCommand.stop, false);
     }
   }
 
@@ -1281,7 +1296,8 @@ class NavigationNotifier extends AutoDisposeAsyncNotifier<NavigationState> {
     final current = state.value;
     if (current == null) return;
 
-    state = AsyncValue.data(current.copyWith(loading: true, error: null));
+    if (current.isPending(NavigationCommand.close)) return;
+    _setCommandPending(NavigationCommand.close, true);
 
     try {
       final repo = await ref.read(navigationRepositoryProvider.future);
@@ -1295,7 +1311,7 @@ class NavigationNotifier extends AutoDisposeAsyncNotifier<NavigationState> {
       }
       await repo.stopNavContainer();
 
-      _missionPollTimer?.cancel();
+      _cancelMissionPolling();
       _statusPollTimer?.cancel();
 
       final cur = state.value ?? current;
@@ -1304,8 +1320,6 @@ class NavigationNotifier extends AutoDisposeAsyncNotifier<NavigationState> {
           viewState: NavViewState.setup,
           navStatus: NavigationStatus.stopped,
           activeMission: null,
-          goalPoint: null,
-          waypoints: [],
           plannedPath: [],
           loading: false,
         ),
@@ -1315,39 +1329,16 @@ class NavigationNotifier extends AutoDisposeAsyncNotifier<NavigationState> {
       state = AsyncValue.data(
         cur.copyWith(loading: false, error: e.toString()),
       );
+    } finally {
+      _setCommandPending(NavigationCommand.close, false);
     }
   }
 
   Future<void> returnToOrigin() async {
-    // Navigate to world origin (0, 0) with heading 0
-    setGoalPoint(0.0, 0.0, theta: 0.0);
-    await startSingleMission();
-  }
-
-  // ─── Waypoint management ───────────────────────────────────
-
-  void addWaypoint(double wx, double wy) {
-    final current = state.value;
-    if (current == null) return;
-    final updated = List<Waypoint>.from(current.waypoints)
-      ..add(Waypoint(x: wx, y: wy, theta: 0.0));
-    state = AsyncValue.data(current.copyWith(waypoints: updated));
-  }
-
-  void removeWaypoint(int index) {
-    final current = state.value;
-    if (current == null) return;
-    if (index < 0 || index >= current.waypoints.length) return;
-    final updated = List<Waypoint>.from(current.waypoints)..removeAt(index);
-    state = AsyncValue.data(current.copyWith(waypoints: updated));
-  }
-
-  // ─── Mode & settings ──────────────────────────────────────
-
-  void setNavMode(NavMode mode) {
-    final current = state.value;
-    if (current == null) return;
-    state = AsyncValue.data(current.copyWith(navMode: mode));
+    await startSingleMission(
+      mode: SingleMissionMode.standard,
+      goal: const Waypoint(x: 0, y: 0, theta: 0),
+    );
   }
 
   Future<void> toggleRelocalization() async {

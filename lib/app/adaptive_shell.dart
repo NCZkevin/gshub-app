@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import '../features/navigation/presentation/navigation_provider.dart';
 import '../shared/widgets/console_widgets.dart';
 import 'theme.dart';
 
-class AdaptiveShell extends StatelessWidget {
+class AdaptiveShell extends ConsumerWidget {
   final Widget child;
   final GoRouterState state;
 
@@ -50,8 +52,14 @@ class AdaptiveShell extends StatelessWidget {
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final location = state.matchedLocation;
+    final navigationActive =
+        location.startsWith('/navigation') &&
+        ref.watch(navigationProvider).valueOrNull?.viewState ==
+            NavViewState.active;
+    if (navigationActive) return child;
+
     final selectedIndex = _selectedIndex(location);
     final isWide = MediaQuery.of(context).size.width >= 600;
 

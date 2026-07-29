@@ -4,13 +4,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
+import 'package:sysapp/app/adaptive_shell.dart';
 import 'package:sysapp/core/utils/map_coords.dart';
 import 'package:sysapp/core/websocket/ws_connection_manager.dart';
 import 'package:sysapp/features/connection/presentation/connection_provider.dart';
 import 'package:sysapp/features/navigation/presentation/navigation_provider.dart';
 import 'package:sysapp/features/navigation/presentation/navigation_screen.dart';
 import 'package:sysapp/shared/domain/app_models.dart';
-import 'package:sysapp/shared/widgets/occupancy_map.dart';
 
 Uint8List _tinyPgm() => Uint8List.fromList([
   80,
@@ -36,7 +36,6 @@ class _FakeNavigationNotifier extends NavigationNotifier {
   static int closeNavigationCount = 0;
   static int submitRelocalizationCount = 0;
   static int startSavedRouteCount = 0;
-  static int loadSavedRouteCount = 0;
 
   static void reset() {
     startMissionCount = 0;
@@ -44,7 +43,6 @@ class _FakeNavigationNotifier extends NavigationNotifier {
     closeNavigationCount = 0;
     submitRelocalizationCount = 0;
     startSavedRouteCount = 0;
-    loadSavedRouteCount = 0;
   }
 
   @override
@@ -73,23 +71,18 @@ class _FakeNavigationNotifier extends NavigationNotifier {
   }
 
   @override
-  void setGoalPoint(double wx, double wy, {double? theta}) {
-    final current = state.value ?? const NavigationState();
-    state = AsyncValue.data(
-      current.copyWith(goalPoint: (wx, wy, theta ?? 0.0)),
-    );
-  }
-
-  @override
-  Future<void> startSingleMission() async {
+  Future<void> startSingleMission({
+    required SingleMissionMode mode,
+    required Waypoint goal,
+  }) async {
     startMissionCount++;
     final current = state.value ?? const NavigationState();
     state = AsyncValue.data(
       current.copyWith(
-        activeMission: const MissionInfo(
+        activeMission: MissionInfo(
           id: 'mission-1',
           status: 'running',
-          mode: 'standard',
+          mode: mode.name,
         ),
         navStatus: NavigationStatus.navigating,
       ),
@@ -116,15 +109,8 @@ class _FakeNavigationNotifier extends NavigationNotifier {
   }
 
   @override
-  Future<void> submitRelocalizationPose() async {
+  Future<void> submitRelocalizationPose(Waypoint pose) async {
     submitRelocalizationCount++;
-  }
-
-  @override
-  void loadSavedRoute(NavLandmark route) {
-    loadSavedRouteCount++;
-    final current = state.value ?? const NavigationState();
-    state = AsyncValue.data(current.copyWith(waypoints: route.points));
   }
 
   @override
@@ -170,57 +156,176 @@ class _SetupNavigationNotifier extends NavigationNotifier {
   }
 }
 
+Future<WsConnectionManager> _pumpNavigation(
+  WidgetTester tester, {
+  Size size = const Size(390, 844),
+}) async {
+  tester.view.devicePixelRatio = 1;
+  tester.view.physicalSize = size;
+  addTearDown(() {
+    tester.view.resetPhysicalSize();
+    tester.view.resetDevicePixelRatio();
+  });
+  final manager = WsConnectionManager();
+  await tester.pumpWidget(
+    ProviderScope(
+      overrides: [
+        navigationProvider.overrideWith(_FakeNavigationNotifier.new),
+        wsManagerProvider.overrideWithValue(manager),
+        activeConnectionProvider.overrideWithValue(null),
+      ],
+      child: const MaterialApp(home: NavigationScreen()),
+    ),
+  );
+  await tester.pumpAndSettle();
+  return manager;
+}
+
 void main() {
   setUp(() {
     _FakeNavigationNotifier.reset();
     _SetupNavigationNotifier.reset();
   });
 
-  testWidgets('map tap selects target without starting mission', (
+  testWidgets('portrait uses immersive map and draggable task sheet', (
     tester,
   ) async {
-    final manager = WsConnectionManager();
+    final manager = await _pumpNavigation(tester);
+
+    expect(find.byKey(const Key('navigation-map')), findsOneWidget);
+    expect(find.byType(DraggableScrollableSheet), findsOneWidget);
+    expect(find.byKey(const Key('navigation-side-panel')), findsNothing);
+    expect(find.byType(NavigationBar), findsNothing);
+    expect(tester.takeException(), isNull);
+    manager.dispose();
+  });
+
+  testWidgets('landscape uses map and fixed task side panel', (tester) async {
+    final manager = await _pumpNavigation(tester, size: const Size(1024, 600));
+
+    expect(find.byKey(const Key('navigation-map')), findsOneWidget);
+    expect(find.byKey(const Key('navigation-side-panel')), findsOneWidget);
+    expect(find.byKey(const Key('navigation-task-sheet')), findsNothing);
+    expect(tester.takeException(), isNull);
+    manager.dispose();
+  });
+
+  testWidgets(
+    'app shell hides all global navigation only in active workspace',
+    (tester) async {
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(390, 844);
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+      final manager = WsConnectionManager();
+      final router = GoRouter(
+        initialLocation: '/navigation',
+        routes: [
+          ShellRoute(
+            builder: (context, state, child) =>
+                AdaptiveShell(state: state, child: child),
+            routes: [
+              GoRoute(
+                path: '/navigation',
+                builder: (_, _) => const NavigationScreen(),
+              ),
+            ],
+          ),
+        ],
+      );
+      addTearDown(router.dispose);
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            navigationProvider.overrideWith(_FakeNavigationNotifier.new),
+            wsManagerProvider.overrideWithValue(manager),
+            activeConnectionProvider.overrideWithValue(null),
+          ],
+          child: MaterialApp.router(routerConfig: router),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byType(NavigationBar), findsNothing);
+      expect(find.byType(NavigationRail), findsNothing);
+      expect(find.byKey(const Key('navigation-map')), findsOneWidget);
+      manager.dispose();
+    },
+  );
+
+  testWidgets('app shell remains visible on navigation setup page', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(390, 844);
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+    });
+    final router = GoRouter(
+      initialLocation: '/navigation',
+      routes: [
+        ShellRoute(
+          builder: (context, state, child) =>
+              AdaptiveShell(state: state, child: child),
+          routes: [
+            GoRoute(
+              path: '/navigation',
+              builder: (_, _) => const NavigationScreen(),
+            ),
+          ],
+        ),
+      ],
+    );
+    addTearDown(router.dispose);
+
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
-          navigationProvider.overrideWith(_FakeNavigationNotifier.new),
-          wsManagerProvider.overrideWithValue(manager),
-          activeConnectionProvider.overrideWithValue(null),
+          navigationProvider.overrideWith(_SetupNavigationNotifier.new),
         ],
-        child: const MaterialApp(home: NavigationScreen()),
+        child: MaterialApp.router(routerConfig: router),
       ),
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byType(OccupancyMap));
+    expect(find.byType(NavigationBar), findsOneWidget);
+    expect(find.text('导航配置'), findsOneWidget);
+  });
+
+  testWidgets('map browsing does not edit until explicit goal mode', (
+    tester,
+  ) async {
+    final manager = await _pumpNavigation(tester);
+
+    await tester.tap(find.byKey(const Key('navigation-map')));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('目标  x'), findsNothing);
+
+    await tester.tap(find.byKey(const Key('pick-single-goal')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('navigation-map')));
     await tester.pumpAndSettle();
 
-    expect(find.textContaining('目标: x='), findsOneWidget);
-    expect(find.text('视频流'), findsOneWidget);
+    expect(find.textContaining('目标  x'), findsOneWidget);
     expect(_FakeNavigationNotifier.startMissionCount, 0);
     expect(tester.takeException(), isNull);
     manager.dispose();
   });
 
-  testWidgets('start navigation sends mission after target selection', (
+  testWidgets('target selection remains draft until explicit mission start', (
     tester,
   ) async {
-    final manager = WsConnectionManager();
-    await tester.pumpWidget(
-      ProviderScope(
-        overrides: [
-          navigationProvider.overrideWith(_FakeNavigationNotifier.new),
-          wsManagerProvider.overrideWithValue(manager),
-          activeConnectionProvider.overrideWithValue(null),
-        ],
-        child: const MaterialApp(home: NavigationScreen()),
-      ),
-    );
-    await tester.pumpAndSettle();
+    final manager = await _pumpNavigation(tester);
 
-    await tester.tap(find.byType(OccupancyMap));
+    await tester.tap(find.byKey(const Key('pick-single-goal')));
     await tester.pumpAndSettle();
-    await tester.tap(find.widgetWithText(ElevatedButton, '开始导航'));
+    await tester.tap(find.byKey(const Key('navigation-map')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('start-single-navigation')));
     await tester.pumpAndSettle();
 
     expect(_FakeNavigationNotifier.startMissionCount, 1);
@@ -229,61 +334,39 @@ void main() {
     manager.dispose();
   });
 
-  testWidgets('stop and close controls stay on navigation route', (
+  testWidgets('persistent stop and close actions control active navigation', (
     tester,
   ) async {
-    final manager = WsConnectionManager();
-    final router = GoRouter(
-      initialLocation: '/',
-      routes: [GoRoute(path: '/', builder: (_, _) => const NavigationScreen())],
-    );
+    final manager = await _pumpNavigation(tester);
 
-    await tester.pumpWidget(
-      ProviderScope(
-        overrides: [
-          navigationProvider.overrideWith(_FakeNavigationNotifier.new),
-          wsManagerProvider.overrideWithValue(manager),
-          activeConnectionProvider.overrideWithValue(null),
-        ],
-        child: MaterialApp.router(routerConfig: router),
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    await tester.tap(find.widgetWithText(FilledButton, '停止任务'));
+    await tester.tap(find.byKey(const Key('stop-navigation-task')));
     await tester.pumpAndSettle();
     expect(_FakeNavigationNotifier.stopTaskCount, 1);
-    expect(find.text('导航'), findsOneWidget);
 
-    await tester.tap(find.widgetWithText(OutlinedButton, '关闭导航'));
+    await tester.tap(find.byKey(const Key('close-navigation')));
     await tester.pumpAndSettle();
+    expect(find.text('关闭导航'), findsOneWidget);
     await tester.tap(find.widgetWithText(FilledButton, '关闭'));
     await tester.pumpAndSettle();
 
     expect(_FakeNavigationNotifier.closeNavigationCount, 1);
+    expect(find.text('导航配置'), findsOneWidget);
     expect(tester.takeException(), isNull);
     manager.dispose();
   });
 
-  testWidgets('relocalization tab selects and submits pose', (tester) async {
-    final manager = WsConnectionManager();
-    await tester.pumpWidget(
-      ProviderScope(
-        overrides: [
-          navigationProvider.overrideWith(_FakeNavigationNotifier.new),
-          wsManagerProvider.overrideWithValue(manager),
-          activeConnectionProvider.overrideWithValue(null),
-        ],
-        child: const MaterialApp(home: NavigationScreen()),
-      ),
-    );
-    await tester.pumpAndSettle();
+  testWidgets('relocalization uses explicit map mode and submit action', (
+    tester,
+  ) async {
+    final manager = await _pumpNavigation(tester);
 
-    await tester.tap(find.text('重定位'));
+    await tester.tap(find.byKey(const Key('nav-mode-relocalize')));
     await tester.pumpAndSettle();
-    await tester.tap(find.byType(OccupancyMap));
+    await tester.tap(find.byKey(const Key('pick-relocalization-pose')));
     await tester.pumpAndSettle();
-    await tester.tap(find.widgetWithText(ElevatedButton, '提交初始位姿'));
+    await tester.tap(find.byKey(const Key('navigation-map')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('submit-relocalization')));
     await tester.pumpAndSettle();
 
     expect(_FakeNavigationNotifier.submitRelocalizationCount, 1);
@@ -291,53 +374,40 @@ void main() {
     manager.dispose();
   });
 
-  testWidgets('saved route tab starts and loads route', (tester) async {
-    final manager = WsConnectionManager();
-    await tester.pumpWidget(
-      ProviderScope(
-        overrides: [
-          navigationProvider.overrideWith(_FakeNavigationNotifier.new),
-          wsManagerProvider.overrideWithValue(manager),
-          activeConnectionProvider.overrideWithValue(null),
-        ],
-        child: const MaterialApp(home: NavigationScreen()),
-      ),
-    );
-    await tester.pumpAndSettle();
+  testWidgets('saved route can execute and load into independent path draft', (
+    tester,
+  ) async {
+    final manager = await _pumpNavigation(tester, size: const Size(1024, 600));
 
-    await tester.tap(find.text('路线'));
+    final savedMode = find.byKey(const Key('nav-mode-savedRoute'));
+    await tester.ensureVisible(savedMode);
     await tester.pumpAndSettle();
-
+    await tester.tap(savedMode);
+    await tester.pumpAndSettle();
     expect(find.text('巡检线'), findsOneWidget);
 
+    await tester.tap(find.text('巡检线'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(OutlinedButton, '加载到路径编辑'));
+    await tester.pumpAndSettle();
+    expect(find.text('P1 1.0,1.0'), findsOneWidget);
+
+    await tester.tap(savedMode);
+    await tester.pumpAndSettle();
     await tester.tap(find.widgetWithText(FilledButton, '执行'));
     await tester.pumpAndSettle();
     expect(_FakeNavigationNotifier.startSavedRouteCount, 1);
 
-    await tester.tap(find.byTooltip('加载到路径'));
-    await tester.pumpAndSettle();
-    expect(_FakeNavigationNotifier.loadSavedRouteCount, 1);
     expect(tester.takeException(), isNull);
     manager.dispose();
   });
 
-  testWidgets('teleop button opens sheet from any navigation status', (
-    tester,
-  ) async {
-    final manager = WsConnectionManager();
-    await tester.pumpWidget(
-      ProviderScope(
-        overrides: [
-          navigationProvider.overrideWith(_FakeNavigationNotifier.new),
-          wsManagerProvider.overrideWithValue(manager),
-          activeConnectionProvider.overrideWithValue(null),
-        ],
-        child: const MaterialApp(home: NavigationScreen()),
-      ),
-    );
-    await tester.pumpAndSettle();
+  testWidgets('auxiliary menu opens teleoperation sheet', (tester) async {
+    final manager = await _pumpNavigation(tester);
 
-    await tester.tap(find.widgetWithText(OutlinedButton, '遥控器'));
+    await tester.tap(find.byKey(const Key('navigation-tools')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('遥控器'));
     await tester.pumpAndSettle();
 
     expect(find.text('急停'), findsOneWidget);
@@ -345,7 +415,7 @@ void main() {
     manager.dispose();
   });
 
-  testWidgets('setup params show dirty warning and apply action', (
+  testWidgets('advanced setup params are collapsed, editable and applicable', (
     tester,
   ) async {
     await tester.pumpWidget(
@@ -358,11 +428,15 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('导航参数'), findsOneWidget);
+    expect(find.text('高级导航参数'), findsOneWidget);
+    expect(find.text('雷达高度'), findsNothing);
+
+    await tester.tap(find.text('高级导航参数'));
+    await tester.pumpAndSettle();
+    expect(find.text('雷达高度'), findsOneWidget);
 
     await tester.enterText(find.widgetWithText(TextFormField, '0.60'), '0.70');
     await tester.pumpAndSettle();
-
     expect(find.textContaining('参数有未应用修改'), findsOneWidget);
 
     await tester.ensureVisible(find.widgetWithText(FilledButton, '应用参数'));
