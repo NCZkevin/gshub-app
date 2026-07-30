@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../features/connection/data/ap_network_service.dart';
 import '../features/connection/presentation/connection_provider.dart';
 import '../features/settings/presentation/settings_provider.dart';
 import 'router.dart';
@@ -14,6 +15,7 @@ class App extends ConsumerWidget {
     final router = ref.watch(routerProvider);
     final themeMode = ref.watch(themeModeProvider);
     final locale = ref.watch(localeProvider);
+    ref.watch(activeNetworkReadyProvider);
 
     ref.listen<String?>(authPromptProvider, (previous, next) {
       if (next == null || next == previous) return;
@@ -49,6 +51,24 @@ class App extends ConsumerWidget {
         ).whenComplete(() {
           ref.read(authPromptProvider.notifier).dismiss();
         });
+      });
+    });
+    ref.listen<AsyncValue<void>>(activeNetworkReadyProvider, (previous, next) {
+      if (!next.hasError || previous?.error == next.error) return;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        final dialogContext = rootNavigatorKey.currentContext;
+        if (dialogContext == null) return;
+        final error = next.error;
+        ScaffoldMessenger.of(dialogContext).showSnackBar(
+          SnackBar(
+            content: Text('无法自动连接机器人热点：$error'),
+            action: SnackBarAction(
+              label: '系统设置',
+              onPressed: () =>
+                  ref.read(apNetworkServiceProvider).openWiFiSettings(),
+            ),
+          ),
+        );
       });
     });
 

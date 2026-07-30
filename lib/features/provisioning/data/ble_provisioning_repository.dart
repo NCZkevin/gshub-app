@@ -209,6 +209,7 @@ class ProvisioningSession {
   StreamSubscription<List<int>>? _eventSubscription;
   var _messageId = 0;
   var _requestId = 0;
+  String? _activeRequestId;
   var _closed = false;
 
   late final QualifiedCharacteristic _deviceInfoCharacteristic;
@@ -275,6 +276,20 @@ class ProvisioningSession {
         .toList(growable: false);
   }
 
+  Future<ProvisioningStatus> getStatus() async {
+    final response = await _request(
+      type: 'status.get',
+      responseType: 'status.result',
+      timeout: const Duration(seconds: 8),
+    );
+    if (response.payload is! Map<String, dynamic>) {
+      throw const FormatException('配网状态响应格式不正确');
+    }
+    return ProvisioningStatus.fromJson(
+      response.payload! as Map<String, dynamic>,
+    );
+  }
+
   Future<Map<String, dynamic>> connectWiFi({
     required String ssid,
     required ProvisioningWiFiSecurity security,
@@ -297,11 +312,37 @@ class ProvisioningSession {
     return response.payload! as Map<String, dynamic>;
   }
 
+  Future<ProvisioningAPResult> startAP() async {
+    final response = await _request(
+      type: 'wifi.ap.start',
+      timeout: const Duration(seconds: 40),
+    );
+    if (response.payload is! Map<String, dynamic>) {
+      throw const FormatException('热点启动响应格式不正确');
+    }
+    return ProvisioningAPResult.fromJson(
+      response.payload! as Map<String, dynamic>,
+    );
+  }
+
+  Future<Map<String, dynamic>> stopAP() async {
+    final response = await _request(
+      type: 'wifi.ap.stop',
+      timeout: const Duration(seconds: 50),
+    );
+    if (response.payload is! Map<String, dynamic>) {
+      throw const FormatException('热点恢复响应格式不正确');
+    }
+    return response.payload! as Map<String, dynamic>;
+  }
+
   Future<void> cancel() async {
+    final requestId = _activeRequestId;
+    if (requestId == null) return;
     await _send(
       ProvisioningEnvelope(
         version: provisioningProtocolVersion,
-        requestId: _nextRequestId(),
+        requestId: requestId,
         type: 'wifi.cancel',
       ),
     );
@@ -309,6 +350,7 @@ class ProvisioningSession {
 
   Future<ProvisioningEnvelope> _request({
     required String type,
+    String? responseType,
     Object? payload,
     required Duration timeout,
   }) async {
@@ -319,31 +361,37 @@ class ProvisioningSession {
       );
     }
     final requestId = _nextRequestId();
+    _activeRequestId = requestId;
     final response = events
         .firstWhere(
           (event) =>
-              event.requestId == requestId && event.type == '$type.result',
+              event.requestId == requestId &&
+              event.type == (responseType ?? '$type.result'),
         )
         .timeout(timeout);
-    await _send(
-      ProvisioningEnvelope(
-        version: provisioningProtocolVersion,
-        requestId: requestId,
-        type: type,
-        payload: payload,
-      ),
-    );
-    final envelope = await response;
-    if (envelope.error != null) {
-      throw ProvisioningException.fromProtocol(envelope.error!);
-    }
-    if (envelope.status != 'succeeded') {
-      throw const ProvisioningException(
-        code: 'INTERNAL_ERROR',
-        message: '配网操作未成功完成',
+    try {
+      await _send(
+        ProvisioningEnvelope(
+          version: provisioningProtocolVersion,
+          requestId: requestId,
+          type: type,
+          payload: payload,
+        ),
       );
+      final envelope = await response;
+      if (envelope.error != null) {
+        throw ProvisioningException.fromProtocol(envelope.error!);
+      }
+      if (envelope.status != 'succeeded') {
+        throw const ProvisioningException(
+          code: 'INTERNAL_ERROR',
+          message: '配网操作未成功完成',
+        );
+      }
+      return envelope;
+    } finally {
+      if (_activeRequestId == requestId) _activeRequestId = null;
     }
-    return envelope;
   }
 
   Future<void> _send(ProvisioningEnvelope envelope) async {

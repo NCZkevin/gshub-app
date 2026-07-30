@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../app/theme.dart';
+import '../../../features/connection/domain/connection_model.dart';
 import '../../../shared/widgets/console_widgets.dart';
 import 'settings_provider.dart';
 import '../../../features/connection/presentation/connection_provider.dart';
@@ -97,7 +98,12 @@ class SettingsScreen extends ConsumerWidget {
                         style: const TextStyle(fontSize: 14),
                       ),
                       subtitle: Text(
-                        conn.baseUrl,
+                        [
+                          conn.networkKind == ConnectionNetworkKind.ap
+                              ? '机器人热点'
+                              : '局域网',
+                          conn.baseUrl,
+                        ].join(' · '),
                         style: const TextStyle(
                           fontSize: 12,
                           fontFamily: 'monospace',
@@ -125,9 +131,9 @@ class SettingsScreen extends ConsumerWidget {
           ),
           const SizedBox(height: 12),
 
-          // ─── Wi-Fi 配网 ───────────────────────────────────────
+          // ─── 网络模式配置 ─────────────────────────────────────
           ConsoleCard(
-            title: 'Wi-Fi 配网',
+            title: '网络模式配置',
             icon: Icons.bluetooth_searching,
             child: _ProvisioningWindowTile(
               enabled: connectionState.active != null,

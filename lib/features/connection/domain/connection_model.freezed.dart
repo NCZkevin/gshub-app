@@ -23,7 +23,10 @@ RobotConnection _$RobotConnectionFromJson(Map<String, dynamic> json) {
 mixin _$RobotConnection {
   String get id => throw _privateConstructorUsedError;
   String get name => throw _privateConstructorUsedError;
-  String get baseUrl => throw _privateConstructorUsedError;
+  String get baseUrl =>
+      throw _privateConstructorUsedError; // e.g. http://192.168.1.100:8080
+  ConnectionNetworkKind get networkKind => throw _privateConstructorUsedError;
+  String? get apSsid => throw _privateConstructorUsedError;
 
   /// Serializes this RobotConnection to a JSON map.
   Map<String, dynamic> toJson() => throw _privateConstructorUsedError;
@@ -42,7 +45,13 @@ abstract class $RobotConnectionCopyWith<$Res> {
     $Res Function(RobotConnection) then,
   ) = _$RobotConnectionCopyWithImpl<$Res, RobotConnection>;
   @useResult
-  $Res call({String id, String name, String baseUrl});
+  $Res call({
+    String id,
+    String name,
+    String baseUrl,
+    ConnectionNetworkKind networkKind,
+    String? apSsid,
+  });
 }
 
 /// @nodoc
@@ -59,7 +68,13 @@ class _$RobotConnectionCopyWithImpl<$Res, $Val extends RobotConnection>
   /// with the given fields replaced by the non-null parameter values.
   @pragma('vm:prefer-inline')
   @override
-  $Res call({Object? id = null, Object? name = null, Object? baseUrl = null}) {
+  $Res call({
+    Object? id = null,
+    Object? name = null,
+    Object? baseUrl = null,
+    Object? networkKind = null,
+    Object? apSsid = freezed,
+  }) {
     return _then(
       _value.copyWith(
             id: null == id
@@ -74,6 +89,14 @@ class _$RobotConnectionCopyWithImpl<$Res, $Val extends RobotConnection>
                 ? _value.baseUrl
                 : baseUrl // ignore: cast_nullable_to_non_nullable
                       as String,
+            networkKind: null == networkKind
+                ? _value.networkKind
+                : networkKind // ignore: cast_nullable_to_non_nullable
+                      as ConnectionNetworkKind,
+            apSsid: freezed == apSsid
+                ? _value.apSsid
+                : apSsid // ignore: cast_nullable_to_non_nullable
+                      as String?,
           )
           as $Val,
     );
@@ -89,7 +112,13 @@ abstract class _$$RobotConnectionImplCopyWith<$Res>
   ) = __$$RobotConnectionImplCopyWithImpl<$Res>;
   @override
   @useResult
-  $Res call({String id, String name, String baseUrl});
+  $Res call({
+    String id,
+    String name,
+    String baseUrl,
+    ConnectionNetworkKind networkKind,
+    String? apSsid,
+  });
 }
 
 /// @nodoc
@@ -105,7 +134,13 @@ class __$$RobotConnectionImplCopyWithImpl<$Res>
   /// with the given fields replaced by the non-null parameter values.
   @pragma('vm:prefer-inline')
   @override
-  $Res call({Object? id = null, Object? name = null, Object? baseUrl = null}) {
+  $Res call({
+    Object? id = null,
+    Object? name = null,
+    Object? baseUrl = null,
+    Object? networkKind = null,
+    Object? apSsid = freezed,
+  }) {
     return _then(
       _$RobotConnectionImpl(
         id: null == id
@@ -120,6 +155,14 @@ class __$$RobotConnectionImplCopyWithImpl<$Res>
             ? _value.baseUrl
             : baseUrl // ignore: cast_nullable_to_non_nullable
                   as String,
+        networkKind: null == networkKind
+            ? _value.networkKind
+            : networkKind // ignore: cast_nullable_to_non_nullable
+                  as ConnectionNetworkKind,
+        apSsid: freezed == apSsid
+            ? _value.apSsid
+            : apSsid // ignore: cast_nullable_to_non_nullable
+                  as String?,
       ),
     );
   }
@@ -132,6 +175,8 @@ class _$RobotConnectionImpl implements _RobotConnection {
     required this.id,
     required this.name,
     required this.baseUrl,
+    this.networkKind = ConnectionNetworkKind.lan,
+    this.apSsid,
   });
 
   factory _$RobotConnectionImpl.fromJson(Map<String, dynamic> json) =>
@@ -143,10 +188,16 @@ class _$RobotConnectionImpl implements _RobotConnection {
   final String name;
   @override
   final String baseUrl;
+  // e.g. http://192.168.1.100:8080
+  @override
+  @JsonKey()
+  final ConnectionNetworkKind networkKind;
+  @override
+  final String? apSsid;
 
   @override
   String toString() {
-    return 'RobotConnection(id: $id, name: $name, baseUrl: $baseUrl)';
+    return 'RobotConnection(id: $id, name: $name, baseUrl: $baseUrl, networkKind: $networkKind, apSsid: $apSsid)';
   }
 
   @override
@@ -156,12 +207,16 @@ class _$RobotConnectionImpl implements _RobotConnection {
             other is _$RobotConnectionImpl &&
             (identical(other.id, id) || other.id == id) &&
             (identical(other.name, name) || other.name == name) &&
-            (identical(other.baseUrl, baseUrl) || other.baseUrl == baseUrl));
+            (identical(other.baseUrl, baseUrl) || other.baseUrl == baseUrl) &&
+            (identical(other.networkKind, networkKind) ||
+                other.networkKind == networkKind) &&
+            (identical(other.apSsid, apSsid) || other.apSsid == apSsid));
   }
 
   @JsonKey(includeFromJson: false, includeToJson: false)
   @override
-  int get hashCode => Object.hash(runtimeType, id, name, baseUrl);
+  int get hashCode =>
+      Object.hash(runtimeType, id, name, baseUrl, networkKind, apSsid);
 
   /// Create a copy of RobotConnection
   /// with the given fields replaced by the non-null parameter values.
@@ -185,6 +240,8 @@ abstract class _RobotConnection implements RobotConnection {
     required final String id,
     required final String name,
     required final String baseUrl,
+    final ConnectionNetworkKind networkKind,
+    final String? apSsid,
   }) = _$RobotConnectionImpl;
 
   factory _RobotConnection.fromJson(Map<String, dynamic> json) =
@@ -195,7 +252,11 @@ abstract class _RobotConnection implements RobotConnection {
   @override
   String get name;
   @override
-  String get baseUrl;
+  String get baseUrl; // e.g. http://192.168.1.100:8080
+  @override
+  ConnectionNetworkKind get networkKind;
+  @override
+  String? get apSsid;
 
   /// Create a copy of RobotConnection
   /// with the given fields replaced by the non-null parameter values.

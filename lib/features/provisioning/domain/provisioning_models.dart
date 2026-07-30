@@ -15,13 +15,17 @@ class ProvisioningDeviceInfo {
   final String model;
   final String softwareVersion;
   final int apiPort;
+  final Set<String> capabilities;
 
   const ProvisioningDeviceInfo({
     required this.sn,
     required this.model,
     required this.softwareVersion,
     required this.apiPort,
+    required this.capabilities,
   });
+
+  bool get supportsAP => capabilities.contains('wifi_ap');
 
   factory ProvisioningDeviceInfo.fromJson(Map<String, dynamic> json) {
     final sn = json['sn']?.toString().trim() ?? '';
@@ -33,6 +37,89 @@ class ProvisioningDeviceInfo {
       model: json['model']?.toString() ?? '',
       softwareVersion: json['software_version']?.toString() ?? '',
       apiPort: (json['api_port'] as num?)?.toInt() ?? 8898,
+      capabilities:
+          (json['capabilities'] as List?)
+              ?.map((item) => item.toString())
+              .toSet() ??
+          const {'wifi_client'},
+    );
+  }
+}
+
+class ProvisioningStatus {
+  final String mode;
+  final bool connected;
+  final String ssid;
+  final String ip;
+  final bool canRestore;
+  final String previousSSID;
+
+  const ProvisioningStatus({
+    required this.mode,
+    required this.connected,
+    required this.ssid,
+    required this.ip,
+    required this.canRestore,
+    required this.previousSSID,
+  });
+
+  bool get apActive => mode == 'ap' && connected;
+
+  factory ProvisioningStatus.fromJson(Map<String, dynamic> json) {
+    final wifi = json['wifi'] is Map<String, dynamic>
+        ? json['wifi'] as Map<String, dynamic>
+        : const <String, dynamic>{};
+    return ProvisioningStatus(
+      mode: wifi['mode']?.toString() ?? 'disconnected',
+      connected: wifi['connected'] == true,
+      ssid: wifi['ssid']?.toString() ?? '',
+      ip: wifi['ip']?.toString() ?? '',
+      canRestore: wifi['can_restore'] == true,
+      previousSSID: wifi['previous_ssid']?.toString() ?? '',
+    );
+  }
+}
+
+class ProvisioningAPResult {
+  final String ssid;
+  final String password;
+  final String ip;
+  final int apiPort;
+  final int prefixLength;
+  final String band;
+  final int channel;
+  final bool canRestore;
+  final String previousSSID;
+
+  const ProvisioningAPResult({
+    required this.ssid,
+    required this.password,
+    required this.ip,
+    required this.apiPort,
+    required this.prefixLength,
+    required this.band,
+    required this.channel,
+    required this.canRestore,
+    required this.previousSSID,
+  });
+
+  factory ProvisioningAPResult.fromJson(Map<String, dynamic> json) {
+    final ssid = json['ssid']?.toString() ?? '';
+    final password = json['password']?.toString() ?? '';
+    final ip = json['ip']?.toString() ?? '';
+    if (ssid.isEmpty || password.isEmpty || ip.isEmpty) {
+      throw const FormatException('热点响应缺少 SSID、密码或 IP');
+    }
+    return ProvisioningAPResult(
+      ssid: ssid,
+      password: password,
+      ip: ip,
+      apiPort: (json['api_port'] as num?)?.toInt() ?? 8898,
+      prefixLength: (json['prefix_length'] as num?)?.toInt() ?? 24,
+      band: json['band']?.toString() ?? '2.4ghz',
+      channel: (json['channel'] as num?)?.toInt() ?? 6,
+      canRestore: json['can_restore'] == true,
+      previousSSID: json['previous_ssid']?.toString() ?? '',
     );
   }
 }

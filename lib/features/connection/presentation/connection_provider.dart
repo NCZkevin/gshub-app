@@ -5,6 +5,7 @@ import '../../../core/api/dio_client.dart';
 import '../../../core/websocket/ws_connection_manager.dart';
 import '../data/connection_repository.dart';
 import '../data/device_discovery_repository.dart';
+import '../data/ap_network_service.dart';
 import '../domain/connection_model.dart';
 
 // ─── Infrastructure Providers ────────────────────────────────
@@ -113,12 +114,21 @@ class ConnectionNotifier extends Notifier<ConnectionState> {
         .where((c) => c.id == robot.sn)
         .firstOrNull;
     final repo = ref.read(connectionRepositoryProvider);
+    final keepAPMetadata =
+        existing?.networkKind == ConnectionNetworkKind.ap &&
+        Uri.tryParse(existing!.baseUrl)?.host ==
+            Uri.tryParse(robot.baseUrl)?.host;
     final conn = RobotConnection(
       id: robot.sn,
       name: existing?.name ?? robot.sn,
       baseUrl: robot.baseUrl,
+      networkKind: keepAPMetadata
+          ? ConnectionNetworkKind.ap
+          : ConnectionNetworkKind.lan,
+      apSsid: keepAPMetadata ? existing.apSsid : null,
     );
     await repo.save(conn);
+    if (!keepAPMetadata) await repo.deleteAPPassword(robot.sn);
     state = state.copyWith(connections: repo.loadAll());
     if (state.activeId == null) await activate(robot.sn);
     if (state.activeId == robot.sn) {
@@ -138,8 +148,34 @@ class ConnectionNotifier extends Notifier<ConnectionState> {
         id: robot.sn,
         name: existing?.name ?? robot.sn,
         baseUrl: robot.baseUrl,
+        networkKind: ConnectionNetworkKind.lan,
       ),
     );
+    await repo.deleteAPPassword(robot.sn);
+    state = state.copyWith(connections: repo.loadAll());
+    await activate(robot.sn);
+    ref.invalidate(dioClientFutureProvider);
+  }
+
+  Future<void> addProvisionedAP({
+    required DiscoveredRobot robot,
+    required String ssid,
+    required String password,
+  }) async {
+    final existing = state.connections
+        .where((connection) => connection.id == robot.sn)
+        .firstOrNull;
+    final repo = ref.read(connectionRepositoryProvider);
+    await repo.save(
+      RobotConnection(
+        id: robot.sn,
+        name: existing?.name ?? robot.sn,
+        baseUrl: robot.baseUrl,
+        networkKind: ConnectionNetworkKind.ap,
+        apSsid: ssid,
+      ),
+    );
+    await repo.saveAPPassword(robot.sn, password);
     state = state.copyWith(connections: repo.loadAll());
     await activate(robot.sn);
     ref.invalidate(dioClientFutureProvider);
@@ -161,7 +197,16 @@ class ConnectionNotifier extends Notifier<ConnectionState> {
     required String apiToken,
   }) async {
     final repo = ref.read(connectionRepositoryProvider);
-    final conn = RobotConnection(id: id, name: name, baseUrl: baseUrl);
+    final existing = state.connections
+        .where((connection) => connection.id == id)
+        .firstOrNull;
+    final conn = RobotConnection(
+      id: id,
+      name: name,
+      baseUrl: baseUrl,
+      networkKind: existing?.networkKind ?? ConnectionNetworkKind.lan,
+      apSsid: existing?.apSsid,
+    );
     await repo.save(conn);
     await repo.saveApiToken(id, apiToken);
     ref.read(authPromptProvider.notifier).reset(id);
@@ -195,6 +240,26 @@ final activeConnectionProvider = Provider<RobotConnection?>((ref) {
   return ref.watch(connectionProvider).active;
 });
 
+final activeNetworkReadyProvider = FutureProvider<void>((ref) async {
+  final connection = ref.watch(activeConnectionProvider);
+  final service = ref.read(apNetworkServiceProvider);
+  if (connection == null ||
+      connection.networkKind != ConnectionNetworkKind.ap) {
+    await service.release(forget: true);
+    return;
+  }
+  final ssid = connection.apSsid?.trim() ?? '';
+  if (ssid.isEmpty) {
+    throw const APNetworkException('AP_SSID_MISSING', '机器人热点名称缺失');
+  }
+  final repository = ref.read(connectionRepositoryProvider);
+  final password = await repository.getAPPassword(connection.id) ?? '';
+  if (password.isEmpty) {
+    throw const APNetworkException('AP_PASSWORD_MISSING', '机器人热点密码缺失');
+  }
+  await service.join(ssid: ssid, password: password);
+});
+
 final dioClientProvider = Provider<DioClient?>((ref) {
   // Token 是异步读取的，通过 dioClientFutureProvider 使用
   return null;
@@ -203,6 +268,7 @@ final dioClientProvider = Provider<DioClient?>((ref) {
 final dioClientFutureProvider = FutureProvider<DioClient?>((ref) async {
   final conn = ref.watch(activeConnectionProvider);
   if (conn == null) return null;
+  await ref.watch(activeNetworkReadyProvider.future);
   final repo = ref.read(connectionRepositoryProvider);
   final token = await repo.getApiToken(conn.id);
   return DioClient.create(
@@ -217,7 +283,8 @@ final dioClientFutureProvider = FutureProvider<DioClient?>((ref) async {
 final wsManagerProvider = Provider<WsConnectionManager>((ref) {
   final manager = WsConnectionManager();
   final conn = ref.watch(activeConnectionProvider);
-  if (conn != null) {
+  final networkReady = ref.watch(activeNetworkReadyProvider);
+  if (conn != null && networkReady.hasValue) {
     final wsUrl = conn.baseUrl
         .replaceFirst('http://', 'ws://')
         .replaceFirst('https://', 'wss://');

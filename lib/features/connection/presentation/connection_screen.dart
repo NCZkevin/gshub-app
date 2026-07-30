@@ -99,7 +99,12 @@ class _ConnectionScreenState extends ConsumerState<ConnectionScreen> {
                       ),
                       title: Text(conn.name),
                       subtitle: Text(
-                        conn.baseUrl,
+                        [
+                          conn.networkKind == ConnectionNetworkKind.ap
+                              ? '机器人热点'
+                              : '局域网',
+                          conn.baseUrl,
+                        ].join(' · '),
                         style: const TextStyle(fontFamily: 'monospace'),
                       ),
                       trailing: Row(
@@ -306,7 +311,7 @@ class _AddConnectionDialogState extends ConsumerState<_AddConnectionDialog> {
                         context.push('/provision');
                       },
                 icon: const Icon(Icons.bluetooth_searching),
-                label: const Text('通过蓝牙配置 Wi-Fi'),
+                label: const Text('通过蓝牙配置网络'),
               ),
               const SizedBox(height: 16),
               const Divider(),

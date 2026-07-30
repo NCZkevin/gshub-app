@@ -7,6 +7,7 @@ const _kConnectionsKey = 'robot_connections';
 const _kActiveIdKey = 'active_connection_id';
 const _kApiTokenPrefix = 'api_token_';
 const _kTerminalTokenPrefix = 'terminal_token_';
+const _kAPPasswordPrefix = 'ap_password_';
 
 class ConnectionRepository {
   final SharedPreferences _prefs;
@@ -67,6 +68,7 @@ class ConnectionRepository {
     );
     await _secure.delete(key: '$_kApiTokenPrefix$id');
     await _secure.delete(key: '$_kTerminalTokenPrefix$id');
+    await _secure.delete(key: '$_kAPPasswordPrefix$id');
     if (getActiveId() == id) {
       await _prefs.remove(_kActiveIdKey);
     }
@@ -78,6 +80,9 @@ class ConnectionRepository {
   Future<String?> getTerminalToken(String id) =>
       _secure.read(key: '$_kTerminalTokenPrefix$id');
 
+  Future<String?> getAPPassword(String id) =>
+      _secure.read(key: '$_kAPPasswordPrefix$id');
+
   Future<void> saveApiToken(String id, String token) {
     final normalized = token.trim();
     if (normalized.isEmpty) {
@@ -88,4 +93,14 @@ class ConnectionRepository {
 
   Future<void> saveTerminalToken(String id, String token) =>
       _secure.write(key: '$_kTerminalTokenPrefix$id', value: token);
+
+  Future<void> saveAPPassword(String id, String password) {
+    if (password.isEmpty) {
+      return _secure.delete(key: '$_kAPPasswordPrefix$id');
+    }
+    return _secure.write(key: '$_kAPPasswordPrefix$id', value: password);
+  }
+
+  Future<void> deleteAPPassword(String id) =>
+      _secure.delete(key: '$_kAPPasswordPrefix$id');
 }

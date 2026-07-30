@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../../app/theme.dart';
 import '../../../shared/widgets/console_widgets.dart';
+import '../../connection/data/ap_network_service.dart';
 import '../../connection/presentation/connection_provider.dart';
 import '../data/ble_provisioning_repository.dart';
 import '../domain/provisioning_models.dart';
@@ -14,9 +15,13 @@ enum _Stage {
   scanningDevices,
   devices,
   connectingDevice,
+  selectingMode,
   scanningWiFi,
   networks,
   connectingWiFi,
+  activatingAP,
+  joiningAP,
+  restoringWiFi,
   verifying,
   succeeded,
 }
@@ -34,6 +39,8 @@ class _ProvisioningScreenState extends ConsumerState<ProvisioningScreen> {
   List<ProvisioningWiFiNetwork> _networks = const [];
   ProvisioningSession? _session;
   ProvisioningDeviceInfo? _deviceInfo;
+  ProvisioningStatus? _status;
+  ProvisioningAPResult? _pendingAP;
   StreamSubscription<ProvisioningEnvelope>? _eventSubscription;
   String? _error;
   String _progress = '';
@@ -58,6 +65,8 @@ class _ProvisioningScreenState extends ConsumerState<ProvisioningScreen> {
       _devices = const [];
       _networks = const [];
       _deviceInfo = null;
+      _status = null;
+      _pendingAP = null;
       _error = null;
       _progress = '正在搜索附近进入配网模式的机器…';
     });
@@ -106,11 +115,115 @@ class _ProvisioningScreenState extends ConsumerState<ProvisioningScreen> {
           });
         },
       );
-      await _scanWiFi();
+      if (session.deviceInfo.supportsAP) {
+        final status = await session.getStatus();
+        if (!mounted) return;
+        setState(() {
+          _status = status;
+          _stage = _Stage.selectingMode;
+          _progress = '';
+        });
+      } else {
+        await _scanWiFi();
+      }
     } catch (error) {
       if (!mounted) return;
       setState(() {
         _stage = _Stage.devices;
+        _error = _displayError(error);
+        _progress = '';
+      });
+    }
+  }
+
+  Future<void> _startAP() async {
+    final session = _session;
+    if (session == null) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('开启机器人热点'),
+        content: const Text(
+          '开启后机器人会断开当前 Wi-Fi，手机随后连接机器人提供的热点。'
+          '机器人将保持 AP 模式，直到恢复上次 Wi-Fi 或配置新的 Wi-Fi。',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('确认开启'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() {
+      _stage = _Stage.activatingAP;
+      _error = null;
+      _progress = '正在创建机器人热点…';
+    });
+    try {
+      final result = await session.startAP();
+      if (!mounted) return;
+      _pendingAP = result;
+      await _joinAP(result);
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _stage = _Stage.selectingMode;
+        _error = _displayError(error);
+        _progress = '';
+      });
+    }
+  }
+
+  Future<void> _joinAP(ProvisioningAPResult ap) async {
+    setState(() {
+      _stage = _Stage.joiningAP;
+      _error = null;
+      _progress = '热点 ${ap.ssid} 已启动，正在让手机加入…';
+    });
+    try {
+      await ref
+          .read(apNetworkServiceProvider)
+          .join(ssid: ap.ssid, password: ap.password);
+      await _verifyAndActivate(ap.ip, ap: ap);
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _stage = _Stage.selectingMode;
+        _error = _displayError(error);
+        _progress = '';
+      });
+    }
+  }
+
+  Future<void> _restorePreviousWiFi() async {
+    final session = _session;
+    if (session == null) return;
+    setState(() {
+      _stage = _Stage.restoringWiFi;
+      _error = null;
+      _progress = '正在恢复 ${_status?.previousSSID ?? '上次 Wi-Fi'}…';
+    });
+    try {
+      final result = await session.stopAP();
+      final ip = result['ip']?.toString() ?? '';
+      if (ip.isEmpty) {
+        throw const ProvisioningException(
+          code: 'NO_IP_ADDRESS',
+          message: '已恢复 Wi-Fi，但机器人没有获得 IP 地址',
+        );
+      }
+      await ref.read(apNetworkServiceProvider).release(forget: true);
+      await _verifyAndActivate(ip);
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _stage = _Stage.selectingMode;
         _error = _displayError(error);
         _progress = '';
       });
@@ -201,6 +314,7 @@ class _ProvisioningScreenState extends ConsumerState<ProvisioningScreen> {
           message: '机器人已连接 Wi-Fi，但没有获得 IP 地址',
         );
       }
+      await ref.read(apNetworkServiceProvider).release(forget: true);
       await _verifyAndActivate(ip);
     } catch (error) {
       if (!mounted) return;
@@ -212,7 +326,7 @@ class _ProvisioningScreenState extends ConsumerState<ProvisioningScreen> {
     }
   }
 
-  Future<void> _verifyAndActivate(String ip) async {
+  Future<void> _verifyAndActivate(String ip, {ProvisioningAPResult? ap}) async {
     final info = _deviceInfo;
     if (info == null) {
       throw const ProvisioningException(
@@ -222,7 +336,9 @@ class _ProvisioningScreenState extends ConsumerState<ProvisioningScreen> {
     }
     setState(() {
       _stage = _Stage.verifying;
-      _progress = 'Wi-Fi 已连接，正在通过 $ip 验证机器人身份…';
+      _progress = ap == null
+          ? 'Wi-Fi 已连接，正在通过 $ip 验证机器人身份…'
+          : '机器人热点已连接，正在通过 $ip 验证身份…';
     });
 
     final discovery = ref.read(deviceDiscoveryRepositoryProvider);
@@ -230,7 +346,7 @@ class _ProvisioningScreenState extends ConsumerState<ProvisioningScreen> {
       try {
         final robot = await discovery.probe(
           host: ip,
-          port: info.apiPort,
+          port: ap?.apiPort ?? info.apiPort,
           timeout: const Duration(seconds: 2),
         );
         if (robot.sn != info.sn) {
@@ -240,7 +356,17 @@ class _ProvisioningScreenState extends ConsumerState<ProvisioningScreen> {
             retryable: false,
           );
         }
-        await ref.read(connectionProvider.notifier).addProvisioned(robot);
+        if (ap == null) {
+          await ref.read(connectionProvider.notifier).addProvisioned(robot);
+        } else {
+          await ref
+              .read(connectionProvider.notifier)
+              .addProvisionedAP(
+                robot: robot,
+                ssid: ap.ssid,
+                password: ap.password,
+              );
+        }
         if (!mounted) return;
         setState(() {
           _stage = _Stage.succeeded;
@@ -256,13 +382,22 @@ class _ProvisioningScreenState extends ConsumerState<ProvisioningScreen> {
     }
     throw ProvisioningException(
       code: 'LOCAL_API_UNREACHABLE',
-      message: '机器人已联网，但手机暂时无法访问 $ip。请确认手机和机器人位于同一 Wi-Fi 后重试。',
+      message: ap == null
+          ? '机器人已联网，但手机暂时无法访问 $ip。请确认手机和机器人位于同一 Wi-Fi 后重试。'
+          : '手机已请求加入 ${ap.ssid}，但暂时无法访问 $ip。请确认系统 Wi-Fi 已连接该热点。',
       retryable: true,
     );
   }
 
   void _handleEvent(ProvisioningEnvelope event) {
-    if (!mounted || event.type != 'wifi.connect.progress') return;
+    if (!mounted ||
+        !{
+          'wifi.connect.progress',
+          'wifi.ap.start.progress',
+          'wifi.ap.stop.progress',
+        }.contains(event.type)) {
+      return;
+    }
     final payload = event.payload;
     if (payload is! Map<String, dynamic>) return;
     final state = payload['state']?.toString() ?? '';
@@ -271,6 +406,9 @@ class _ProvisioningScreenState extends ConsumerState<ProvisioningScreen> {
       'obtaining_ip' => '认证成功，正在获取 IP 地址…',
       'verifying_route' => '已获得 IP，正在检查默认路由…',
       'connected' => 'Wi-Fi 已连接…',
+      'ap_activating' => '正在启动机器人热点和 DHCP…',
+      'ap_active' => '机器人热点已启动…',
+      'restoring_wifi' => '正在恢复上次 Wi-Fi…',
       _ => '正在连接 Wi-Fi…',
     };
     setState(() => _progress = label);
@@ -301,13 +439,16 @@ class _ProvisioningScreenState extends ConsumerState<ProvisioningScreen> {
       _Stage.connectingDevice,
       _Stage.scanningWiFi,
       _Stage.connectingWiFi,
+      _Stage.activatingAP,
+      _Stage.joiningAP,
+      _Stage.restoringWiFi,
       _Stage.verifying,
     }.contains(_stage);
 
     return ConsoleScaffold(
       appBar: AppBar(
         title: const ConsoleAppBarTitle(
-          title: '蓝牙配置 Wi-Fi',
+          title: '蓝牙网络配置',
           subtitle: 'BLE provisioning',
         ),
         leading: BackButton(
@@ -337,11 +478,15 @@ class _ProvisioningScreenState extends ConsumerState<ProvisioningScreen> {
                         textAlign: TextAlign.center,
                         style: Theme.of(context).textTheme.titleMedium,
                       ),
-                      if (_stage == _Stage.connectingWiFi) ...[
+                      if ({
+                        _Stage.connectingWiFi,
+                        _Stage.activatingAP,
+                        _Stage.restoringWiFi,
+                      }.contains(_stage)) ...[
                         const SizedBox(height: 12),
                         TextButton(
                           onPressed: _cancelConnection,
-                          child: const Text('取消连接'),
+                          child: const Text('取消操作'),
                         ),
                       ],
                     ],
@@ -366,6 +511,7 @@ class _ProvisioningScreenState extends ConsumerState<ProvisioningScreen> {
                 const SizedBox(height: 12),
               ],
               if (_stage == _Stage.devices) _buildDevices(),
+              if (_stage == _Stage.selectingMode) _buildModeSelection(),
               if (_stage == _Stage.networks) _buildNetworks(),
               if (_stage == _Stage.succeeded)
                 const ConsoleCard(
@@ -391,11 +537,17 @@ class _ProvisioningScreenState extends ConsumerState<ProvisioningScreen> {
   Widget _buildStepIndicator() {
     final step = switch (_stage) {
       _Stage.scanningDevices || _Stage.devices => 0,
-      _Stage.connectingDevice || _Stage.scanningWiFi || _Stage.networks => 1,
-      _Stage.connectingWiFi || _Stage.verifying => 2,
+      _Stage.connectingDevice || _Stage.selectingMode => 1,
+      _Stage.scanningWiFi ||
+      _Stage.networks ||
+      _Stage.connectingWiFi ||
+      _Stage.activatingAP ||
+      _Stage.joiningAP ||
+      _Stage.restoringWiFi ||
+      _Stage.verifying => 2,
       _Stage.succeeded => 3,
     };
-    const labels = ['发现机器', '选择 Wi-Fi', '连接验证', '完成'];
+    const labels = ['发现机器', '选择模式', '网络切换', '完成'];
     return Row(
       children: List.generate(labels.length, (index) {
         final active = index <= step;
@@ -418,6 +570,79 @@ class _ProvisioningScreenState extends ConsumerState<ProvisioningScreen> {
           ),
         );
       }),
+    );
+  }
+
+  Widget _buildModeSelection() {
+    final info = _deviceInfo;
+    final status = _status;
+    final pending = _pendingAP;
+    return ConsoleCard(
+      title: info == null ? '选择网络模式' : '${info.sn} · 选择网络模式',
+      icon: Icons.settings_input_antenna,
+      child: Column(
+        children: [
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(Icons.wifi),
+            title: const Text('连接现有 Wi-Fi'),
+            subtitle: const Text('扫描附近路由器，让机器人加入局域网'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: _scanWiFi,
+          ),
+          const Divider(),
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(Icons.wifi_tethering),
+            title: Text(status?.apActive == true ? '连接当前机器人热点' : '开启机器人热点'),
+            subtitle: Text(
+              status?.apActive == true
+                  ? '重新获取热点凭据并让手机加入'
+                  : '机器人提供 2.4 GHz 热点，手机直接连接控制',
+            ),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: _startAP,
+          ),
+          if (status?.canRestore == true) ...[
+            const Divider(),
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.settings_backup_restore),
+              title: const Text('恢复上次 Wi-Fi'),
+              subtitle: Text(status!.previousSSID),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: _restorePreviousWiFi,
+            ),
+          ],
+          if (pending != null) ...[
+            const Divider(height: 24),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                '热点：${pending.ssid}\n密码：${pending.password}\n机器人地址：${pending.ip}',
+                style: const TextStyle(fontFamily: 'monospace'),
+              ),
+            ),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 8,
+              children: [
+                OutlinedButton.icon(
+                  onPressed: () => _joinAP(pending),
+                  icon: const Icon(Icons.refresh),
+                  label: const Text('重试自动连接'),
+                ),
+                TextButton.icon(
+                  onPressed: () =>
+                      ref.read(apNetworkServiceProvider).openWiFiSettings(),
+                  icon: const Icon(Icons.settings),
+                  label: const Text('打开系统设置'),
+                ),
+              ],
+            ),
+          ],
+        ],
+      ),
     );
   }
 
@@ -530,12 +755,19 @@ class _ProvisioningScreenState extends ConsumerState<ProvisioningScreen> {
         'NO_DEFAULT_ROUTE' => '已连接 Wi-Fi，但没有可用的默认路由。',
         'ASSOCIATION_FAILED' => '无法加入该 Wi-Fi，请检查路由器状态后重试。',
         'CONNECT_TIMEOUT' => '连接 Wi-Fi 超时，请靠近路由器后重试。',
+        'AP_UNSUPPORTED' => '这台机器的无线网卡不支持热点模式。',
+        'AP_DHCP_UNAVAILABLE' => '机器人热点未能启动 IP 分配服务，已尝试恢复原 Wi-Fi。',
+        'AP_START_FAILED' => '机器人热点启动失败，已尝试恢复原 Wi-Fi。',
+        'AP_RESTORE_FAILED' => '恢复上次 Wi-Fi 失败，机器人会继续保持热点模式。',
+        'NO_SAVED_NETWORK' => '没有可恢复的历史 Wi-Fi，请选择并配置一个新网络。',
+        'CANCELED' => '操作已取消。',
         'UNSUPPORTED_SECURITY' => '该 Wi-Fi 的安全类型暂不支持。',
         'BUSY' => '另一台手机或另一个配网操作正在进行。',
         'BLUETOOTH_DISCONNECTED' => '蓝牙连接已断开，请重新搜索机器。',
         _ => error.message,
       };
     }
+    if (error is APNetworkException) return error.message;
     if (error is TimeoutException) return '操作超时，请重试。';
     return '操作失败：$error';
   }
