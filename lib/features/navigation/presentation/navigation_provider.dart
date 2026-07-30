@@ -50,11 +50,21 @@ enum NavParamField {
   deviceLeftDistance,
 }
 
+bool _isFootprintField(NavParamField field) {
+  return switch (field) {
+    NavParamField.robotLength ||
+    NavParamField.robotWidth ||
+    NavParamField.deviceFrontDistance ||
+    NavParamField.deviceLeftDistance => true,
+    _ => false,
+  };
+}
+
 const navParamNames = [
   'robot:lidar_height',
   'robot:footprint',
-  'navigation:free_navigation:min_obstacle_height',
-  'navigation:free_navigation:max_obstacle_height',
+  'general:min_obstacle_height',
+  'general:max_obstacle_height',
   'navigation:free_navigation:linear_speed',
   'navigation:free_navigation:angular_speed',
   'navigation:free_navigation:xy_goal_tolerance',
@@ -68,6 +78,28 @@ const navParamNames = [
   'navigation:fixed_point_navigation:lateral_safety_distance',
   'navigation:fixed_point_navigation:forward_safety_distance',
 ];
+
+bool _hasReadableFootprint(Map<String, dynamic> params) {
+  final footprint = params['robot:footprint'];
+  if (footprint is! Map<String, dynamic> ||
+      footprint['success'] != true ||
+      footprint['value'] is! List) {
+    return false;
+  }
+  final points = (footprint['value'] as List)
+      .whereType<List>()
+      .map(
+        (point) =>
+            point.whereType<num>().map((value) => value.toDouble()).toList(),
+      )
+      .toList();
+  if (points.length != 4 || points.any((point) => point.length != 2)) {
+    return false;
+  }
+  final length = points[0][0] - points[2][0];
+  final width = points[0][1] - points[1][1];
+  return length > 0 && width > 0;
+}
 
 class NavParamForm {
   final double lidarHeight;
@@ -255,12 +287,8 @@ class NavParamForm {
 
     form = form.copyWith(
       lidarHeight: numberValue('robot:lidar_height'),
-      freeMinObstacleHeight: numberValue(
-        'navigation:free_navigation:min_obstacle_height',
-      ),
-      freeMaxObstacleHeight: numberValue(
-        'navigation:free_navigation:max_obstacle_height',
-      ),
+      freeMinObstacleHeight: numberValue('general:min_obstacle_height'),
+      freeMaxObstacleHeight: numberValue('general:max_obstacle_height'),
       freeLinearSpeed: numberValue('navigation:free_navigation:linear_speed'),
       freeAngularSpeed: numberValue('navigation:free_navigation:angular_speed'),
       freeXyGoalTolerance: numberValue(
@@ -343,8 +371,8 @@ class NavParamForm {
     return {
       'robot:lidar_height': lidarHeight,
       'robot:footprint': footprint,
-      'navigation:free_navigation:min_obstacle_height': freeMinObstacleHeight,
-      'navigation:free_navigation:max_obstacle_height': freeMaxObstacleHeight,
+      'general:min_obstacle_height': freeMinObstacleHeight,
+      'general:max_obstacle_height': freeMaxObstacleHeight,
       'navigation:free_navigation:linear_speed': freeLinearSpeed,
       'navigation:free_navigation:angular_speed': freeAngularSpeed,
       'navigation:free_navigation:xy_goal_tolerance': freeXyGoalTolerance,
@@ -391,6 +419,16 @@ class MissionInfo {
     'canceled',
     'stopped',
   }.contains(status);
+
+  MissionInfo withStatus(String nextStatus) {
+    return MissionInfo(
+      id: id,
+      status: nextStatus,
+      mode: mode,
+      currentStep: currentStep,
+      totalSteps: totalSteps,
+    );
+  }
 
   factory MissionInfo.fromJson(Map<String, dynamic> json) {
     return MissionInfo(
@@ -451,6 +489,8 @@ class NavigationState {
   final List<(double x, double y)> plannedPath;
   final NavParamForm navParams;
   final bool navParamsDirty;
+  final bool savedFootprintLoaded;
+  final bool footprintDirty;
   final String? navParamsMessage;
   final bool navReady;
   final bool useRelocalizationOnStart;
@@ -472,6 +512,8 @@ class NavigationState {
     this.plannedPath = const [],
     this.navParams = const NavParamForm(),
     this.navParamsDirty = false,
+    this.savedFootprintLoaded = false,
+    this.footprintDirty = false,
     this.navParamsMessage,
     this.navReady = false,
     this.useRelocalizationOnStart = true,
@@ -499,6 +541,8 @@ class NavigationState {
     List<(double, double)>? plannedPath,
     NavParamForm? navParams,
     bool? navParamsDirty,
+    bool? savedFootprintLoaded,
+    bool? footprintDirty,
     Object? navParamsMessage = _sentinel,
     bool? navReady,
     bool? useRelocalizationOnStart,
@@ -526,6 +570,8 @@ class NavigationState {
       plannedPath: plannedPath ?? this.plannedPath,
       navParams: navParams ?? this.navParams,
       navParamsDirty: navParamsDirty ?? this.navParamsDirty,
+      savedFootprintLoaded: savedFootprintLoaded ?? this.savedFootprintLoaded,
+      footprintDirty: footprintDirty ?? this.footprintDirty,
       navParamsMessage: navParamsMessage == _sentinel
           ? this.navParamsMessage
           : navParamsMessage as String?,
@@ -588,8 +634,9 @@ class NavigationNotifier extends AutoDisposeAsyncNotifier<NavigationState> {
       if (running) {
         final maps = await repo.fetchMaps();
         final navStatus = await _fetchNavStatus(repo);
-        final navParams = await _fetchSavedNavParams(repo);
-        final selectedMap = await _fetchCurrentMapName(repo, maps);
+        final savedParams = await _fetchSavedNavParams(repo);
+        final selectedMap = await _fetchCurrentMapName(repo);
+        final activeMission = await _fetchCurrentMission(repo);
         final pgmBytes = selectedMap == null
             ? null
             : await repo.fetchMapPgm(selectedMap);
@@ -609,22 +656,33 @@ class NavigationNotifier extends AutoDisposeAsyncNotifier<NavigationState> {
           selectedMap: selectedMap,
           pgmBytes: pgmBytes,
           mapMeta: mapMeta,
-          navStatus: navStatus?.status ?? NavigationStatus.vacant,
+          navStatus: activeMission == null
+              ? navStatus?.status ?? NavigationStatus.vacant
+              : _statusFromMission(
+                  activeMission.status,
+                  navStatus?.status ?? NavigationStatus.vacant,
+                ),
+          activeMission: activeMission,
           navReady: navStatus != null && selectedMap != null,
-          navParams: navParams,
+          navParams: savedParams.form,
+          savedFootprintLoaded: savedParams.footprintLoaded,
           savedRoutes: savedRoutes,
         );
         unawaited(Future<void>.microtask(wsManager.reconnectOdometry));
         _startStatusPolling(repo);
+        if (activeMission?.id.isNotEmpty == true) {
+          _startMissionPolling(repo, activeMission!.id);
+        }
         return initialState;
       } else {
         final maps = await repo.fetchMaps();
-        final navParams = await _fetchSavedNavParams(repo);
+        final savedParams = await _fetchSavedNavParams(repo);
         return NavigationState(
           viewState: NavViewState.setup,
           maps: maps,
           selectedMap: maps.isNotEmpty ? maps.first.name : null,
-          navParams: navParams,
+          navParams: savedParams.form,
+          savedFootprintLoaded: savedParams.footprintLoaded,
         );
       }
     } catch (e) {
@@ -645,12 +703,33 @@ class NavigationNotifier extends AutoDisposeAsyncNotifier<NavigationState> {
     );
   }
 
-  Future<NavParamForm> _fetchSavedNavParams(NavigationRepository repo) async {
+  Future<({NavParamForm form, bool footprintLoaded})> _fetchSavedNavParams(
+    NavigationRepository repo,
+  ) async {
     try {
       final params = await repo.getSavedNavParams(navParamNames);
-      return NavParamForm.fromSavedParams(params);
+      return (
+        form: NavParamForm.fromSavedParams(params),
+        footprintLoaded: _hasReadableFootprint(params),
+      );
     } catch (_) {
-      return const NavParamForm();
+      return (form: const NavParamForm(), footprintLoaded: false);
+    }
+  }
+
+  Future<MissionInfo?> _fetchCurrentMission(NavigationRepository repo) async {
+    try {
+      final missionId = await repo.fetchCurrentNavigationTaskId();
+      if (missionId == null) return null;
+      try {
+        final mission = MissionInfo.fromJson(
+          await repo.fetchMission(missionId),
+        );
+        if (mission.id.isNotEmpty) return mission;
+      } catch (_) {}
+      return MissionInfo(id: missionId, status: 'running');
+    } catch (_) {
+      return null;
     }
   }
 
@@ -665,10 +744,7 @@ class NavigationNotifier extends AutoDisposeAsyncNotifier<NavigationState> {
     }
   }
 
-  Future<String?> _fetchCurrentMapName(
-    NavigationRepository repo,
-    List<MapInfo> maps,
-  ) async {
+  Future<String?> _fetchCurrentMapName(NavigationRepository repo) async {
     try {
       final params = await repo.getNavParams(['current_map']);
       final entry = params['current_map'];
@@ -677,7 +753,7 @@ class NavigationNotifier extends AutoDisposeAsyncNotifier<NavigationState> {
           entry['value'] != null) {
         return entry['value'].toString();
       }
-      return maps.isNotEmpty ? maps.first.name : null;
+      return null;
     } catch (_) {
       return null;
     }
@@ -758,7 +834,7 @@ class NavigationNotifier extends AutoDisposeAsyncNotifier<NavigationState> {
         MapMeta? resolvedMeta;
         List<NavLandmark>? resolvedRoutes;
         if (current.selectedMap == null) {
-          resolvedMap = await _fetchCurrentMapName(repo, current.maps);
+          resolvedMap = await _fetchCurrentMapName(repo);
           if (_disposed || generation != _statusPollGeneration) return;
           if (resolvedMap != null) {
             resolvedPgm = await repo.fetchMapPgm(resolvedMap);
@@ -772,15 +848,38 @@ class NavigationNotifier extends AutoDisposeAsyncNotifier<NavigationState> {
         }
 
         if (_disposed || generation != _statusPollGeneration) return;
+        final stateBeforeRecovery = state.value;
+        if (stateBeforeRecovery == null) return;
+
+        MissionInfo? recoveredMission;
+        if (stateBeforeRecovery.activeMission == null &&
+            (navStatus.status == NavigationStatus.navigating ||
+                navStatus.status == NavigationStatus.paused)) {
+          recoveredMission = await _fetchCurrentMission(repo);
+          if (_disposed || generation != _statusPollGeneration) return;
+        }
+
+        List<(double, double)> plannedPath = const [];
+        if (navStatus.status == NavigationStatus.navigating ||
+            navStatus.status == NavigationStatus.paused) {
+          try {
+            plannedPath = await repo.fetchPlanPath();
+          } catch (_) {
+            plannedPath = state.value?.plannedPath ?? const [];
+          }
+          if (_disposed || generation != _statusPollGeneration) return;
+        }
+
         final latest = state.value;
         if (latest == null) return;
-
-        final mission = latest.activeMission;
+        final mission = latest.activeMission ?? recoveredMission;
         final effectiveStatus = mission == null
             ? navStatus.status
             : _statusFromMission(mission.status, navStatus.status);
         var next = latest.copyWith(
           navStatus: effectiveStatus,
+          activeMission: mission,
+          plannedPath: plannedPath,
           navReady: latest.selectedMap != null || resolvedMap != null,
         );
         if (latest.selectedMap == null && resolvedMap != null) {
@@ -792,6 +891,10 @@ class NavigationNotifier extends AutoDisposeAsyncNotifier<NavigationState> {
           );
         }
         state = AsyncValue.data(next);
+        if (latest.activeMission == null &&
+            recoveredMission?.id.isNotEmpty == true) {
+          _startMissionPolling(repo, recoveredMission!.id);
+        }
       } catch (_) {
       } finally {
         requestInFlight = false;
@@ -810,12 +913,6 @@ class NavigationNotifier extends AutoDisposeAsyncNotifier<NavigationState> {
         final mission = MissionInfo.fromJson(
           await repo.fetchMission(missionId),
         );
-        List<(double, double)>? plannedPath;
-        if (mission.isActive) {
-          try {
-            plannedPath = await repo.fetchPlanPath();
-          } catch (_) {}
-        }
         if (generation != _missionPollGeneration) return;
         final current = state.value;
         if (current == null ||
@@ -827,7 +924,6 @@ class NavigationNotifier extends AutoDisposeAsyncNotifier<NavigationState> {
           current.copyWith(
             activeMission: mission.id.isEmpty ? current.activeMission : mission,
             navStatus: _statusFromMission(mission.status, current.navStatus),
-            plannedPath: plannedPath ?? current.plannedPath,
           ),
         );
         if (!mission.isActive) {
@@ -937,6 +1033,7 @@ class NavigationNotifier extends AutoDisposeAsyncNotifier<NavigationState> {
       current.copyWith(
         navParams: current.navParams.withField(field, value),
         navParamsDirty: true,
+        footprintDirty: current.footprintDirty || _isFootprintField(field),
         navParamsMessage: null,
       ),
     );
@@ -965,12 +1062,14 @@ class NavigationNotifier extends AutoDisposeAsyncNotifier<NavigationState> {
     try {
       final repo = await ref.read(navigationRepositoryProvider.future);
       if (repo == null) return;
-      final params = await _fetchSavedNavParams(repo);
+      final savedParams = await _fetchSavedNavParams(repo);
       final cur = state.value ?? current;
       state = AsyncValue.data(
         cur.copyWith(
-          navParams: params,
+          navParams: savedParams.form,
           navParamsDirty: false,
+          savedFootprintLoaded: savedParams.footprintLoaded,
+          footprintDirty: false,
           navParamsMessage: '已加载已保存参数',
           loading: false,
         ),
@@ -986,12 +1085,16 @@ class NavigationNotifier extends AutoDisposeAsyncNotifier<NavigationState> {
   Future<void> applyNavParams() async {
     final current = state.value;
     if (current == null) return;
-    final payload = current.navParams.toPayload();
-    if (payload == null) {
+    final formPayload = current.navParams.toPayload();
+    if (formPayload == null) {
       state = AsyncValue.data(
         current.copyWith(navParamsMessage: '本体长度和宽度必须大于 0'),
       );
       return;
+    }
+    final payload = Map<String, dynamic>.from(formPayload);
+    if (!current.savedFootprintLoaded && !current.footprintDirty) {
+      payload.remove('robot:footprint');
     }
 
     state = AsyncValue.data(
@@ -1007,7 +1110,9 @@ class NavigationNotifier extends AutoDisposeAsyncNotifier<NavigationState> {
         cur.copyWith(
           loading: false,
           navParamsDirty: false,
-          navParamsMessage: '参数已应用',
+          savedFootprintLoaded: cur.savedFootprintLoaded || cur.footprintDirty,
+          footprintDirty: false,
+          navParamsMessage: '参数已保存',
         ),
       );
     } catch (e) {
@@ -1227,15 +1332,28 @@ class NavigationNotifier extends AutoDisposeAsyncNotifier<NavigationState> {
     try {
       final repo = await ref.read(navigationRepositoryProvider.future);
       if (repo == null) return;
-      final result = await repo.startLandmark(route.id, cycles);
-      final mission = MissionInfo.fromJson(result);
+      final mission = MissionInfo.fromJson(
+        await repo.createMission({
+          'mode': 'route',
+          'frame_id': 'map',
+          'waypoints': route.points
+              .map(
+                (point) => {'x': point.x, 'y': point.y, 'theta': point.theta},
+              )
+              .toList(),
+          'cycles': cycles.clamp(1, 999),
+        }),
+      );
       final cur = state.value ?? current;
       state = AsyncValue.data(
         cur.copyWith(
-          activeMission: mission.id.isEmpty ? cur.activeMission : mission,
-          navStatus: mission.id.isEmpty
-              ? NavigationStatus.navigating
-              : _statusFromMission(mission.status, NavigationStatus.navigating),
+          activeMission: mission,
+          navStatus: _statusFromMission(
+            mission.status,
+            NavigationStatus.navigating,
+          ),
+          plannedPath: const [],
+          error: null,
         ),
       );
       if (mission.id.isNotEmpty) {
@@ -1344,20 +1462,20 @@ class NavigationNotifier extends AutoDisposeAsyncNotifier<NavigationState> {
       final mission = current.activeMission;
       if (mission != null && mission.isActive && mission.id.isNotEmpty) {
         await repo.cancelMission(mission.id);
+        final cur = state.value ?? current;
+        state = AsyncValue.data(
+          cur.copyWith(
+            navStatus: NavigationStatus.navigating,
+            activeMission: mission.withStatus('stopping'),
+            error: null,
+          ),
+        );
+        _startMissionPolling(repo, mission.id);
       } else {
         await repo.stopNavigating();
+        final cur = state.value ?? current;
+        state = AsyncValue.data(cur.copyWith(error: null));
       }
-
-      _cancelMissionPolling();
-
-      final cur = state.value ?? current;
-      state = AsyncValue.data(
-        cur.copyWith(
-          navStatus: NavigationStatus.stopped,
-          activeMission: null,
-          plannedPath: [],
-        ),
-      );
     } catch (e) {
       final cur = state.value ?? current;
       state = AsyncValue.data(cur.copyWith(error: e.toString()));

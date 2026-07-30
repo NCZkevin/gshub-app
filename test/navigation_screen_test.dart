@@ -160,7 +160,7 @@ class _SetupNavigationNotifier extends NavigationNotifier {
     applyParamsCount++;
     final current = state.value ?? const NavigationState();
     state = AsyncValue.data(
-      current.copyWith(navParamsDirty: false, navParamsMessage: '参数已应用'),
+      current.copyWith(navParamsDirty: false, navParamsMessage: '参数已保存'),
     );
   }
 }
@@ -529,15 +529,15 @@ void main() {
 
     await tester.enterText(find.widgetWithText(TextFormField, '0.60'), '0.70');
     await tester.pumpAndSettle();
-    expect(find.textContaining('参数有未应用修改'), findsOneWidget);
+    expect(find.textContaining('参数有未保存修改'), findsOneWidget);
 
-    await tester.ensureVisible(find.widgetWithText(FilledButton, '应用参数'));
+    await tester.ensureVisible(find.widgetWithText(FilledButton, '保存参数'));
     await tester.pumpAndSettle();
-    await tester.tap(find.widgetWithText(FilledButton, '应用参数'));
+    await tester.tap(find.widgetWithText(FilledButton, '保存参数'));
     await tester.pumpAndSettle();
 
     expect(_SetupNavigationNotifier.applyParamsCount, 1);
-    expect(find.text('参数已应用'), findsOneWidget);
+    expect(find.text('参数已保存'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 }

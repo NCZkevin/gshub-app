@@ -96,6 +96,18 @@ class NavigationRepository {
     return data as Map<String, dynamic>;
   }
 
+  /// GET /tasks/current → 当前运行/停止中的任务；仅返回导航任务 ID。
+  Future<String?> fetchCurrentNavigationTaskId() async {
+    final data = await _client.get('/tasks/current');
+    if (data == null) return null;
+    final task = data as Map<String, dynamic>;
+    final type = task['Type'] ?? task['type'];
+    if (type != 'navigation') return null;
+    final id = task['ID'] ?? task['id'];
+    final value = id?.toString() ?? '';
+    return value.isEmpty ? null : value;
+  }
+
   Future<void> cancelMission(String missionId) =>
       _client.delete('/nav/missions/$missionId');
 

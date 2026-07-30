@@ -152,7 +152,7 @@ class _AdvancedParameters extends ConsumerWidget {
           children: [
             const Expanded(child: Text('高级导航参数')),
             if (state.navParamsDirty)
-              const StatusPill(label: '未应用', color: AppTheme.warning),
+              const StatusPill(label: '未保存', color: AppTheme.warning),
           ],
         ),
         subtitle: const Text('通常无需修改'),
@@ -160,7 +160,7 @@ class _AdvancedParameters extends ConsumerWidget {
         children: [
           if (state.navParamsDirty) ...[
             const _MessageBanner(
-              message: '参数有未应用修改，启动导航不会自动保存这些参数',
+              message: '参数有未保存修改，启动导航不会自动保存这些参数',
               color: AppTheme.warning,
             ),
             const SizedBox(height: 10),
@@ -239,7 +239,7 @@ class _AdvancedParameters extends ConsumerWidget {
                 child: FilledButton.icon(
                   onPressed: state.loading ? null : notifier.applyNavParams,
                   icon: const Icon(Icons.check, size: 16),
-                  label: const Text('应用参数'),
+                  label: const Text('保存参数'),
                 ),
               ),
             ],

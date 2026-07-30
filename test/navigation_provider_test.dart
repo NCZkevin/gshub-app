@@ -37,6 +37,9 @@ void main() {
     when(
       () => repository.getNavParams(any()),
     ).thenAnswer((_) async => <String, dynamic>{});
+    when(
+      () => repository.fetchCurrentNavigationTaskId(),
+    ).thenAnswer((_) async => null);
     when(() => repository.fetchMapPgm(any())).thenAnswer((_) async => null);
     when(
       () => repository.fetchLandmarks(any()),
@@ -189,7 +192,7 @@ void main() {
       await Future<void>.delayed(Duration.zero);
 
       expect(state.viewState, NavViewState.active);
-      expect(state.selectedMap, 'demo_map');
+      expect(state.selectedMap, isNull);
       expect(state.navStatus, NavigationStatus.vacant);
       expect(state.navReady, isFalse);
       expect(state.error, isNull);
@@ -387,4 +390,325 @@ void main() {
       expect(state.navStatus, NavigationStatus.navigating);
     },
   );
+
+  test('running container restores the current navigation mission', () async {
+    when(
+      () => repository.checkContainerStatus(),
+    ).thenAnswer((_) async => {'running': true, 'status': 'running'});
+    when(
+      () => repository.fetchNavStatus(),
+    ).thenAnswer((_) async => const NavStatus(status: NavigationStatus.vacant));
+    when(
+      () => repository.fetchCurrentNavigationTaskId(),
+    ).thenAnswer((_) async => 'task-current-1');
+    when(() => repository.fetchMission('task-current-1')).thenAnswer(
+      (_) async => {
+        'mission_id': 'task-current-1',
+        'status': 'running',
+        'mode': 'route',
+      },
+    );
+
+    final container = createContainer();
+    final subscription = container.listen(
+      navigationProvider,
+      (_, _) {},
+      fireImmediately: true,
+    );
+    addTearDown(subscription.close);
+
+    final state = await container.read(navigationProvider.future);
+
+    expect(state.activeMission?.id, 'task-current-1');
+    expect(state.activeMission?.status, 'running');
+    expect(state.navStatus, NavigationStatus.navigating);
+    verify(repository.fetchCurrentNavigationTaskId).called(1);
+    verify(() => repository.fetchMission('task-current-1')).called(1);
+  });
+
+  test('saved route uses the mission API and keeps its mission id', () async {
+    when(
+      () => repository.checkContainerStatus(),
+    ).thenAnswer((_) async => {'running': true, 'status': 'running'});
+    when(
+      () => repository.fetchNavStatus(),
+    ).thenAnswer((_) async => const NavStatus(status: NavigationStatus.vacant));
+    when(() => repository.getNavParams(any())).thenAnswer(
+      (_) async => {
+        'current_map': {'success': true, 'value': 'demo_map'},
+      },
+    );
+    when(() => repository.createMission(any())).thenAnswer(
+      (_) async => {
+        'mission_id': 'route-mission-1',
+        'status': 'running',
+        'mode': 'route',
+      },
+    );
+
+    final container = createContainer();
+    final subscription = container.listen(
+      navigationProvider,
+      (_, _) {},
+      fireImmediately: true,
+    );
+    addTearDown(subscription.close);
+    await container.read(navigationProvider.future);
+
+    const route = NavLandmark(
+      id: 7,
+      name: '巡检路线',
+      sceneName: 'demo_map',
+      kind: 'route',
+      points: [
+        Waypoint(x: 1, y: 2, theta: 0.1),
+        Waypoint(x: 3, y: 4, theta: 0.2),
+      ],
+    );
+    await container.read(navigationProvider.notifier).startSavedRoute(route, 3);
+
+    final request =
+        verify(() => repository.createMission(captureAny())).captured.single
+            as Map<String, dynamic>;
+    expect(request['mode'], 'route');
+    expect(request['frame_id'], 'map');
+    expect(request['cycles'], 3);
+    expect(request['waypoints'], [
+      {'x': 1.0, 'y': 2.0, 'theta': 0.1},
+      {'x': 3.0, 'y': 4.0, 'theta': 0.2},
+    ]);
+    verifyNever(() => repository.startLandmark(any(), any()));
+    expect(
+      container.read(navigationProvider).requireValue.activeMission?.id,
+      'route-mission-1',
+    );
+  });
+
+  test(
+    'cancel keeps mission in stopping state until polling is terminal',
+    () async {
+      when(
+        () => repository.checkContainerStatus(),
+      ).thenAnswer((_) async => {'running': true, 'status': 'running'});
+      when(() => repository.fetchNavStatus()).thenAnswer(
+        (_) async => const NavStatus(status: NavigationStatus.vacant),
+      );
+      when(() => repository.getNavParams(any())).thenAnswer(
+        (_) async => {
+          'current_map': {'success': true, 'value': 'demo_map'},
+        },
+      );
+      when(() => repository.createMission(any())).thenAnswer(
+        (_) async => {
+          'mission_id': 'mission-stop-1',
+          'status': 'running',
+          'mode': 'standard',
+        },
+      );
+      when(
+        () => repository.cancelMission('mission-stop-1'),
+      ).thenAnswer((_) async {});
+      when(() => repository.fetchMission('mission-stop-1')).thenAnswer(
+        (_) async => {
+          'mission_id': 'mission-stop-1',
+          'status': 'cancelled',
+          'mode': 'standard',
+        },
+      );
+
+      final container = createContainer();
+      final subscription = container.listen(
+        navigationProvider,
+        (_, _) {},
+        fireImmediately: true,
+      );
+      addTearDown(subscription.close);
+      await container.read(navigationProvider.future);
+      await container
+          .read(navigationProvider.notifier)
+          .startSingleMission(
+            mode: SingleMissionMode.standard,
+            goal: const Waypoint(x: 1, y: 2),
+          );
+
+      await container.read(navigationProvider.notifier).stopTask();
+
+      final stopping = container.read(navigationProvider).requireValue;
+      expect(stopping.activeMission?.id, 'mission-stop-1');
+      expect(stopping.activeMission?.status, 'stopping');
+      expect(stopping.navStatus, NavigationStatus.navigating);
+
+      await Future<void>.delayed(const Duration(milliseconds: 1100));
+
+      final terminal = container.read(navigationProvider).requireValue;
+      expect(terminal.activeMission?.status, 'cancelled');
+      expect(terminal.navStatus, NavigationStatus.stopped);
+    },
+  );
+
+  test(
+    'runtime navigation status refreshes plan without a local mission',
+    () async {
+      when(
+        () => repository.checkContainerStatus(),
+      ).thenAnswer((_) async => {'running': true, 'status': 'running'});
+      when(() => repository.fetchNavStatus()).thenAnswer(
+        (_) async => const NavStatus(status: NavigationStatus.navigating),
+      );
+      when(() => repository.getNavParams(any())).thenAnswer(
+        (_) async => {
+          'current_map': {'success': true, 'value': 'demo_map'},
+        },
+      );
+      when(
+        () => repository.fetchPlanPath(),
+      ).thenAnswer((_) async => const [(1.0, 2.0), (3.0, 4.0)]);
+
+      final container = createContainer();
+      final subscription = container.listen(
+        navigationProvider,
+        (_, _) {},
+        fireImmediately: true,
+      );
+      addTearDown(subscription.close);
+      await container.read(navigationProvider.future);
+
+      await Future<void>.delayed(const Duration(milliseconds: 2100));
+
+      expect(
+        container.read(navigationProvider).requireValue.plannedPath,
+        const [(1.0, 2.0), (3.0, 4.0)],
+      );
+      verify(repository.fetchPlanPath).called(1);
+    },
+  );
+
+  test('running container never guesses the first map', () async {
+    when(() => repository.fetchMaps()).thenAnswer(
+      (_) async => const [MapInfo(name: 'map_a'), MapInfo(name: 'map_b')],
+    );
+    when(
+      () => repository.checkContainerStatus(),
+    ).thenAnswer((_) async => {'running': true, 'status': 'running'});
+    when(
+      () => repository.fetchNavStatus(),
+    ).thenAnswer((_) async => const NavStatus(status: NavigationStatus.vacant));
+    when(
+      () => repository.getNavParams(any()),
+    ).thenAnswer((_) async => <String, dynamic>{});
+
+    final container = createContainer();
+    final subscription = container.listen(
+      navigationProvider,
+      (_, _) {},
+      fireImmediately: true,
+    );
+    addTearDown(subscription.close);
+
+    final state = await container.read(navigationProvider.future);
+
+    expect(state.selectedMap, isNull);
+    expect(state.navReady, isFalse);
+    verifyNever(() => repository.fetchMapPgm(any()));
+  });
+
+  test('navigation params use canonical obstacle height keys', () {
+    expect(navParamNames, contains('general:min_obstacle_height'));
+    expect(navParamNames, contains('general:max_obstacle_height'));
+    expect(
+      navParamNames,
+      isNot(contains('navigation:free_navigation:min_obstacle_height')),
+    );
+    expect(
+      navParamNames,
+      isNot(contains('navigation:free_navigation:max_obstacle_height')),
+    );
+
+    final form = NavParamForm.fromSavedParams({
+      'general:min_obstacle_height': {'success': true, 'value': 0.25},
+      'general:max_obstacle_height': {'success': true, 'value': 1.75},
+    });
+    expect(form.freeMinObstacleHeight, 0.25);
+    expect(form.freeMaxObstacleHeight, 1.75);
+
+    final payload = form.toPayload()!;
+    expect(payload['general:min_obstacle_height'], 0.25);
+    expect(payload['general:max_obstacle_height'], 1.75);
+    expect(
+      payload,
+      isNot(contains('navigation:free_navigation:min_obstacle_height')),
+    );
+    expect(
+      payload,
+      isNot(contains('navigation:free_navigation:max_obstacle_height')),
+    );
+  });
+
+  test('saving params does not overwrite an unread footprint', () async {
+    when(
+      () => repository.checkContainerStatus(),
+    ).thenAnswer((_) async => {'running': false, 'status': 'not_found'});
+    when(
+      () => repository.setNavParams(any()),
+    ).thenAnswer((_) async => <String, dynamic>{});
+
+    final container = createContainer();
+    final subscription = container.listen(
+      navigationProvider,
+      (_, _) {},
+      fireImmediately: true,
+    );
+    addTearDown(subscription.close);
+    await container.read(navigationProvider.future);
+
+    container
+        .read(navigationProvider.notifier)
+        .updateNavParam(NavParamField.lidarHeight, 0.75);
+    await container.read(navigationProvider.notifier).applyNavParams();
+
+    final payload =
+        verify(() => repository.setNavParams(captureAny())).captured.single
+            as Map<String, dynamic>;
+    expect(payload, isNot(contains('robot:footprint')));
+    expect(
+      container.read(navigationProvider).requireValue.navParamsMessage,
+      '参数已保存',
+    );
+  });
+
+  test('saving an edited footprint includes the new footprint', () async {
+    when(
+      () => repository.checkContainerStatus(),
+    ).thenAnswer((_) async => {'running': false, 'status': 'not_found'});
+    when(
+      () => repository.setNavParams(any()),
+    ).thenAnswer((_) async => <String, dynamic>{});
+
+    final container = createContainer();
+    final subscription = container.listen(
+      navigationProvider,
+      (_, _) {},
+      fireImmediately: true,
+    );
+    addTearDown(subscription.close);
+    await container.read(navigationProvider.future);
+
+    container
+        .read(navigationProvider.notifier)
+        .updateNavParam(NavParamField.robotLength, 1.0);
+    await container.read(navigationProvider.notifier).applyNavParams();
+
+    final payload =
+        verify(() => repository.setNavParams(captureAny())).captured.single
+            as Map<String, dynamic>;
+    expect(payload['robot:footprint'], [
+      [0.4, 0.25],
+      [0.4, -0.25],
+      [-0.6, -0.25],
+      [-0.6, 0.25],
+    ]);
+    final state = container.read(navigationProvider).requireValue;
+    expect(state.savedFootprintLoaded, isTrue);
+    expect(state.footprintDirty, isFalse);
+  });
 }
