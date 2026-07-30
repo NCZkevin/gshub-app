@@ -9,6 +9,7 @@ import 'package:sysapp/app/app.dart';
 import 'package:sysapp/features/connection/presentation/connection_provider.dart';
 import 'package:sysapp/features/connection/presentation/connection_screen.dart';
 import 'package:sysapp/features/settings/presentation/settings_screen.dart';
+import 'package:sysapp/shared/widgets/console_widgets.dart';
 
 void main() {
   testWidgets(
@@ -73,5 +74,41 @@ void main() {
 
     expect(find.text('设置'), findsOneWidget);
     expect(find.text('所有机器'), findsOneWidget);
+  });
+
+  testWidgets('machine card keeps its address compact on a narrow screen', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(320, 640));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    const address = 'http://192.168.100.100:8898';
+    SharedPreferences.setMockInitialValues({
+      'robot_connections': jsonEncode([
+        {'id': 'robot-1', 'name': '巡检机器人一号', 'baseUrl': address},
+      ]),
+    });
+    final prefs = await SharedPreferences.getInstance();
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [sharedPreferencesProvider.overrideWithValue(prefs)],
+        child: const MaterialApp(home: ConnectionScreen()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final addressText = tester.widget<Text>(find.textContaining(address));
+    expect(addressText.maxLines, 1);
+    expect(addressText.overflow, TextOverflow.ellipsis);
+    expect(
+      tester.getSize(find.byType(ConsoleCard)).height,
+      lessThanOrEqualTo(120),
+    );
+
+    await tester.tap(find.byTooltip('更多操作'));
+    await tester.pumpAndSettle();
+    expect(find.text('编辑'), findsOneWidget);
+    expect(find.text('删除'), findsOneWidget);
+    expect(tester.takeException(), isNull);
   });
 }

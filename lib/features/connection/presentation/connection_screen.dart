@@ -80,61 +80,21 @@ class _ConnectionScreenState extends ConsumerState<ConnectionScreen> {
               itemBuilder: (context, i) {
                 final conn = state.connections[i];
                 final isActive = conn.id == state.activeId;
-                return Padding(
-                  padding: const EdgeInsets.only(bottom: 10),
-                  child: ConsoleCard(
-                    padding: EdgeInsets.zero,
-                    child: ListTile(
-                      leading: CircleAvatar(
-                        backgroundColor: isActive
-                            ? AppTheme.primaryColor.withValues(alpha: 0.18)
-                            : AppTheme.slate500.withValues(alpha: 0.18),
-                        child: Icon(
-                          isActive ? Icons.wifi : Icons.wifi_off,
-                          color: isActive
-                              ? AppTheme.primaryColor
-                              : AppTheme.slate500,
-                          size: 20,
-                        ),
-                      ),
-                      title: Text(conn.name),
-                      subtitle: Text(
-                        [
-                          conn.networkKind == ConnectionNetworkKind.ap
-                              ? '机器人热点'
-                              : '局域网',
-                          conn.baseUrl,
-                        ].join(' · '),
-                        style: const TextStyle(fontFamily: 'monospace'),
-                      ),
-                      trailing: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          if (!isActive)
-                            TextButton(
-                              onPressed: () => ref
-                                  .read(connectionProvider.notifier)
-                                  .activate(conn.id),
-                              child: const Text('连接'),
-                            ),
-                          if (isActive)
-                            const StatusPill(
-                              label: 'ACTIVE',
-                              color: AppTheme.success,
-                            ),
-                          IconButton(
-                            icon: const Icon(Icons.edit_outlined),
-                            tooltip: '编辑',
-                            onPressed: () => _showEditDialog(context, conn),
-                          ),
-                          IconButton(
-                            icon: const Icon(Icons.delete_outline),
-                            color: AppTheme.danger,
-                            tooltip: '删除',
-                            onPressed: () =>
-                                _confirmDelete(context, conn.id, conn.name),
-                          ),
-                        ],
+                return Align(
+                  alignment: Alignment.topCenter,
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 760),
+                    child: Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: _MachineCard(
+                        connection: conn,
+                        isActive: isActive,
+                        onConnect: () => ref
+                            .read(connectionProvider.notifier)
+                            .activate(conn.id),
+                        onEdit: () => _showEditDialog(context, conn),
+                        onDelete: () =>
+                            _confirmDelete(context, conn.id, conn.name),
                       ),
                     ),
                   ),
@@ -174,6 +134,183 @@ class _ConnectionScreenState extends ConsumerState<ConnectionScreen> {
             child: const Text('删除', style: TextStyle(color: AppTheme.danger)),
           ),
         ],
+      ),
+    );
+  }
+}
+
+enum _MachineAction { edit, delete }
+
+class _MachineCard extends StatelessWidget {
+  const _MachineCard({
+    required this.connection,
+    required this.isActive,
+    required this.onConnect,
+    required this.onEdit,
+    required this.onDelete,
+  });
+
+  final RobotConnection connection;
+  final bool isActive;
+  final VoidCallback onConnect;
+  final VoidCallback onEdit;
+  final VoidCallback onDelete;
+
+  @override
+  Widget build(BuildContext context) {
+    final networkLabel = connection.networkKind == ConnectionNetworkKind.ap
+        ? '机器人热点'
+        : '局域网';
+    final networkIcon = connection.networkKind == ConnectionNetworkKind.ap
+        ? Icons.wifi_tethering
+        : Icons.lan_outlined;
+    final accent = isActive ? AppTheme.primaryColor : AppTheme.slate500;
+
+    return ConsoleCard(
+      padding: EdgeInsets.zero,
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              children: [
+                Container(
+                  width: 42,
+                  height: 42,
+                  decoration: BoxDecoration(
+                    color: accent.withValues(alpha: 0.12),
+                    border: Border.all(color: accent.withValues(alpha: 0.24)),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(
+                    isActive ? Icons.wifi_rounded : Icons.wifi_off_rounded,
+                    color: accent,
+                    size: 20,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    connection.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                if (isActive)
+                  const StatusPill(label: 'ACTIVE', color: AppTheme.success)
+                else
+                  TextButton.icon(
+                    onPressed: onConnect,
+                    style: TextButton.styleFrom(
+                      minimumSize: const Size(0, 36),
+                      padding: const EdgeInsets.symmetric(horizontal: 10),
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      visualDensity: VisualDensity.compact,
+                    ),
+                    icon: const Icon(Icons.link_rounded, size: 16),
+                    label: const Text('连接'),
+                  ),
+                PopupMenuButton<_MachineAction>(
+                  tooltip: '更多操作',
+                  padding: EdgeInsets.zero,
+                  style: IconButton.styleFrom(
+                    minimumSize: const Size(40, 40),
+                    maximumSize: const Size(40, 40),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  icon: const Icon(Icons.more_vert_rounded, size: 20),
+                  onSelected: (action) {
+                    switch (action) {
+                      case _MachineAction.edit:
+                        onEdit();
+                      case _MachineAction.delete:
+                        onDelete();
+                    }
+                  },
+                  itemBuilder: (context) => const [
+                    PopupMenuItem(
+                      value: _MachineAction.edit,
+                      child: Row(
+                        children: [
+                          Icon(Icons.edit_outlined, size: 18),
+                          SizedBox(width: 10),
+                          Text('编辑'),
+                        ],
+                      ),
+                    ),
+                    PopupMenuItem(
+                      value: _MachineAction.delete,
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.delete_outline,
+                            size: 18,
+                            color: AppTheme.danger,
+                          ),
+                          SizedBox(width: 10),
+                          Text('删除', style: TextStyle(color: AppTheme.danger)),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              decoration: BoxDecoration(
+                color: AppTheme.subtleFill(context).withValues(alpha: 0.72),
+                border: Border.all(color: AppTheme.borderColor(context)),
+                borderRadius: BorderRadius.circular(9),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    networkIcon,
+                    size: 15,
+                    color: AppTheme.mutedText(context),
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    networkLabel,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  Container(
+                    width: 1,
+                    height: 14,
+                    margin: const EdgeInsets.symmetric(horizontal: 8),
+                    color: AppTheme.borderColor(context),
+                  ),
+                  Expanded(
+                    child: Tooltip(
+                      message: connection.baseUrl,
+                      child: Text(
+                        connection.baseUrl,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          fontFamily: 'monospace',
+                          fontSize: 12,
+                          letterSpacing: 0,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

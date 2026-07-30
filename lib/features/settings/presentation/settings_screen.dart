@@ -59,6 +59,8 @@ class SettingsScreen extends ConsumerWidget {
                   subtitle: connectionState.active != null
                       ? Text(
                           connectionState.active!.baseUrl,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                           style: _monoSubtitleStyle(context),
                         )
                       : Text('请先连接机器', style: _subtitleStyle(context)),
@@ -95,6 +97,8 @@ class SettingsScreen extends ConsumerWidget {
                       ),
                       title: Text(
                         conn.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                         style: const TextStyle(fontSize: 14),
                       ),
                       subtitle: Text(
@@ -104,6 +108,8 @@ class SettingsScreen extends ConsumerWidget {
                               : '局域网',
                           conn.baseUrl,
                         ].join(' · '),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
                           fontSize: 12,
                           fontFamily: 'monospace',
