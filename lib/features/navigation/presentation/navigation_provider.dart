@@ -614,6 +614,7 @@ class NavigationNotifier extends AutoDisposeAsyncNotifier<NavigationState> {
           navParams: navParams,
           savedRoutes: savedRoutes,
         );
+        unawaited(Future<void>.microtask(wsManager.reconnectOdometry));
         _startStatusPolling(repo);
         return initialState;
       } else {
@@ -1049,6 +1050,7 @@ class NavigationNotifier extends AutoDisposeAsyncNotifier<NavigationState> {
           error: null,
         ),
       );
+      ref.read(wsManagerProvider).reconnectOdometry();
       _startStatusPolling(repo);
     } catch (e) {
       final cur = state.value ?? current;

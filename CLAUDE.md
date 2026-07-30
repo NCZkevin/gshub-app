@@ -90,7 +90,7 @@ When the active connection changes (`activate()` or `update()`), `dioClientProvi
 ### WebSocket layer
 
 `WsConnectionManager` (`lib/core/websocket/ws_connection_manager.dart`) maintains two persistent WebSocket connections:
-- **Odometry** (`/tower/odometry/robot_odometry`) — emits `RobotOdometry` on `odometryStream`.
+- **Navigation map pose** (`ws://robot:7997`, topic `/map_pose_odometry`) — subscribes through ROS Bridge and emits map-frame `RobotOdometry` on `odometryStream`.
 - **Control** (`/tower/control/cmd_vel`) — outgoing cmd_vel with 100 ms cooldown; use `sendCmdVel(linearX, angularZ)` or `sendStop()`.
 
 Both channels use exponential backoff reconnection (2–30 s). Generation counters prevent stale reconnect callbacks after `disconnect()`.

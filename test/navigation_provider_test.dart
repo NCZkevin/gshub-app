@@ -11,13 +11,22 @@ import 'package:sysapp/shared/domain/app_models.dart';
 
 class _MockNavigationRepository extends Mock implements NavigationRepository {}
 
+class _RecordingWsManager extends WsConnectionManager {
+  int odometryReconnectCount = 0;
+
+  @override
+  void reconnectOdometry() {
+    odometryReconnectCount++;
+  }
+}
+
 void main() {
   late _MockNavigationRepository repository;
-  late WsConnectionManager wsManager;
+  late _RecordingWsManager wsManager;
 
   setUp(() {
     repository = _MockNavigationRepository();
-    wsManager = WsConnectionManager();
+    wsManager = _RecordingWsManager();
 
     when(
       () => repository.fetchMaps(),
@@ -141,6 +150,7 @@ void main() {
       expect(state.navReady, isFalse);
       expect(state.loading, isFalse);
       expect(state.error, isNull);
+      expect(wsManager.odometryReconnectCount, 1);
       verify(
         () => repository.startNavContainer('demo_map', relocalization: true),
       ).called(1);
@@ -176,12 +186,14 @@ void main() {
       addTearDown(subscription.close);
 
       final state = await container.read(navigationProvider.future);
+      await Future<void>.delayed(Duration.zero);
 
       expect(state.viewState, NavViewState.active);
       expect(state.selectedMap, 'demo_map');
       expect(state.navStatus, NavigationStatus.vacant);
       expect(state.navReady, isFalse);
       expect(state.error, isNull);
+      expect(wsManager.odometryReconnectCount, 1);
       verify(repository.fetchNavStatus).called(1);
     },
   );

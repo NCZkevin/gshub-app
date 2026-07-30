@@ -1,5 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math' as math;
+
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 class RobotOdometry {
@@ -13,18 +15,54 @@ class RobotOdometry {
     required this.heading,
   });
 
-  factory RobotOdometry.fromJson(Map<String, dynamic> json) => RobotOdometry(
-    x: (json['x'] as num).toDouble(),
-    y: (json['y'] as num).toDouble(),
-    heading: (json['heading'] as num).toDouble(),
-  );
+  factory RobotOdometry.fromJson(Map<String, dynamic> json) {
+    final message = json['msg'];
+    if (message is Map<String, dynamic>) {
+      final poseWrapper = message['pose'];
+      final pose = poseWrapper is Map<String, dynamic>
+          ? poseWrapper['pose']
+          : null;
+      if (pose is Map<String, dynamic>) {
+        final position = pose['position'];
+        final orientation = pose['orientation'];
+        if (position is Map<String, dynamic> &&
+            orientation is Map<String, dynamic>) {
+          final qx = _number(orientation, 'x');
+          final qy = _number(orientation, 'y');
+          final qz = _number(orientation, 'z');
+          final qw = _number(orientation, 'w');
+          final sinyCosp = 2 * (qw * qz + qx * qy);
+          final cosyCosp = 1 - 2 * (qy * qy + qz * qz);
+          return RobotOdometry(
+            x: _number(position, 'x'),
+            y: _number(position, 'y'),
+            heading: math.atan2(sinyCosp, cosyCosp),
+          );
+        }
+      }
+    }
+
+    return RobotOdometry(
+      x: _number(json, 'x'),
+      y: _number(json, 'y'),
+      heading: _number(json, 'heading'),
+    );
+  }
+
+  static double _number(Map<String, dynamic> json, String key) {
+    final value = json[key];
+    if (value is! num) {
+      throw FormatException('missing numeric odometry field: $key');
+    }
+    return value.toDouble();
+  }
 }
 
 /// 统一管理所有 WebSocket 连接
-/// - 里程计（odometryStream）
+/// - 导航地图坐标位姿（odometryStream）
 /// - 机器人控制（sendCmdVel）
 class WsConnectionManager {
-  String _odometryWsBaseUrl = '';
+  String _odometryWsUrl = '';
   String _controlWsUrl = '';
   bool _active = false;
 
@@ -52,16 +90,26 @@ class WsConnectionManager {
 
   void connect({
     required String odometryWsBaseUrl,
+    String? navigationOdometryWsUrl,
     required String controlWsUrl,
   }) {
     disconnect();
-    _odometryWsBaseUrl = odometryWsBaseUrl;
+    final baseUri = Uri.parse(odometryWsBaseUrl);
+    _odometryWsUrl =
+        navigationOdometryWsUrl ??
+        Uri(scheme: baseUri.scheme, host: baseUri.host, port: 7997).toString();
     _controlWsUrl = controlWsUrl;
     _active = true;
     _odometryRetry = 0;
     _controlRetry = 0;
     _connectOdometry(++_odometryGen);
     _connectControl(++_controlGen);
+  }
+
+  void reconnectOdometry() {
+    if (!_active || _odometryWsUrl.isEmpty) return;
+    _odometryRetry = 0;
+    _connectOdometry(++_odometryGen);
   }
 
   void disconnect() {
@@ -88,7 +136,7 @@ class WsConnectionManager {
     _odometryChannel?.sink.close();
     _odometryChannel = null;
 
-    final uri = Uri.parse('$_odometryWsBaseUrl/tower/odometry/robot_odometry');
+    final uri = Uri.parse(_odometryWsUrl);
     final channel = WebSocketChannel.connect(uri);
     _odometryChannel = channel;
 
@@ -132,6 +180,9 @@ class WsConnectionManager {
         // Swallow — reconnect handled via onDone after cancelOnError
       },
       cancelOnError: true,
+    );
+    channel.sink.add(
+      jsonEncode({'op': 'subscribe', 'topic': '/map_pose_odometry'}),
     );
   }
 
