@@ -8,10 +8,13 @@ import 'package:go_router/go_router.dart';
 import '../../../app/theme.dart';
 import '../../../core/websocket/ws_connection_manager.dart';
 import '../../../features/connection/presentation/connection_provider.dart';
+import '../../../features/dashboard/domain/motion_item.dart';
 import '../../../features/dashboard/presentation/dashboard_provider.dart';
 import '../../../shared/widgets/video_view_widget.dart';
 
 enum _RemoteVideoMode { both, left, right }
+
+enum _RemotePanel { actions, settings }
 
 enum _SpeedPreset {
   slow('慢速', 0.3),
@@ -48,19 +51,18 @@ class _RemoteScreenState extends ConsumerState<RemoteScreen> {
 
   _RemoteVideoMode _videoMode = _RemoteVideoMode.both;
   _SpeedPreset _speed = _SpeedPreset.normal;
-  bool _videoPlaying = false;
   bool _videoBusy = false;
   bool _controlsLocked = true;
-  bool _detailsOpen = false;
+  bool _showVelocity = true;
   bool _showUnlockHint = false;
   bool _rotatingLeft = false;
   bool _rotatingRight = false;
+  _RemotePanel? _openPanel;
   double _joystickX = 0;
   double _joystickY = 0;
   double _linearX = 0;
   double _linearY = 0;
   double _angularZ = 0;
-  DateTime? _lastCommandAt;
 
   @override
   void initState() {
@@ -100,7 +102,7 @@ class _RemoteScreenState extends ConsumerState<RemoteScreen> {
 
   @override
   void dispose() {
-    _stopAll(force: true, updateState: false);
+    _stopAll(updateState: false);
     _controlTimer?.cancel();
     _idleTimer?.cancel();
     _hintTimer?.cancel();
@@ -124,7 +126,6 @@ class _RemoteScreenState extends ConsumerState<RemoteScreen> {
         _connectVideoSide(_leftVideo, url),
         _connectVideoSide(_rightVideo, url),
       ]);
-      if (mounted) setState(() => _videoPlaying = true);
     } finally {
       if (mounted) setState(() => _videoBusy = false);
     }
@@ -164,8 +165,11 @@ class _RemoteScreenState extends ConsumerState<RemoteScreen> {
   }
 
   void _lockControls() {
-    _stopAll(force: true);
-    setState(() => _controlsLocked = true);
+    _stopAll();
+    setState(() {
+      _controlsLocked = true;
+      _openPanel = null;
+    });
   }
 
   void _resetIdleTimer() {
@@ -185,7 +189,7 @@ class _RemoteScreenState extends ConsumerState<RemoteScreen> {
       _joystickX = _applyDeadZone(x);
       _joystickY = _applyDeadZone(y);
       _applySpeedToVelocity();
-      _detailsOpen = false;
+      _openPanel = null;
     });
     _sendNow();
     _ensureControlLoop();
@@ -214,7 +218,7 @@ class _RemoteScreenState extends ConsumerState<RemoteScreen> {
         _rotatingRight = active;
       }
       _angularZ = _rotationValue();
-      _detailsOpen = false;
+      _openPanel = null;
     });
     _sendNow();
     _syncLoopAfterState();
@@ -273,10 +277,9 @@ class _RemoteScreenState extends ConsumerState<RemoteScreen> {
     } else {
       _wsManager.sendStop();
     }
-    _lastCommandAt = DateTime.now();
   }
 
-  void _stopAll({bool force = false, bool updateState = true}) {
+  void _stopAll({bool updateState = true}) {
     _controlTimer?.cancel();
     _controlTimer = null;
     if (updateState && mounted) {
@@ -299,7 +302,6 @@ class _RemoteScreenState extends ConsumerState<RemoteScreen> {
       _joystickY = 0;
     }
     _wsManager.sendStop();
-    if (force) _lastCommandAt = DateTime.now();
   }
 
   Future<void> _startMotion(DashboardState data) async {
@@ -309,16 +311,84 @@ class _RemoteScreenState extends ConsumerState<RemoteScreen> {
   }
 
   Future<void> _emergencyStop(DashboardState data) async {
-    _stopAll(force: true);
-    setState(() => _controlsLocked = true);
+    _stopAll();
+    setState(() {
+      _controlsLocked = true;
+      _openPanel = null;
+    });
     final action = data.motionItems
-        .where((item) => item['id']?.toString() == 'emergency_stop')
+        .where((item) => motionItemId(item) == 'emergency_stop')
         .firstOrNull;
     if (action != null) {
-      await ref
-          .read(dashboardProvider.notifier)
-          .triggerMotion('emergency_stop');
+      try {
+        await ref
+            .read(dashboardProvider.notifier)
+            .triggerMotion('emergency_stop');
+        if (mounted) _showMessage('急停指令已发送');
+      } catch (error) {
+        if (mounted) _showMessage('急停执行失败：$error');
+      }
     }
+  }
+
+  void _togglePanel(_RemotePanel panel) {
+    setState(() => _openPanel = _openPanel == panel ? null : panel);
+  }
+
+  Future<void> _confirmMotion(
+    Map<String, dynamic> item, {
+    required bool motionRunning,
+  }) async {
+    if (_controlsLocked || !motionRunning) return;
+
+    final id = motionItemId(item);
+    if (id.isEmpty) return;
+    final label = motionItemLabel(item);
+    final description = motionItemDescription(item);
+
+    _stopAll();
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text('执行“$label”？'),
+        content: Text(description ?? '机器人将立即执行该动作，请确认周围环境安全。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('确认执行'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted || confirmed != true) return;
+    final currentData = ref.read(dashboardProvider).valueOrNull;
+    final stillRunning =
+        currentData?.servicesStatus?['motion']?['status'] == 'running';
+    if (_controlsLocked || !stillRunning) {
+      _showMessage('控制已锁定或 motion 已停止，动作未执行');
+      return;
+    }
+
+    try {
+      await ref.read(dashboardProvider.notifier).triggerMotion(id);
+      if (mounted) _showMessage('$label 执行成功');
+    } catch (error) {
+      if (mounted) _showMessage('动作执行失败：$error');
+    } finally {
+      if (mounted) _resetIdleTimer();
+    }
+  }
+
+  void _showMessage(String message) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(content: Text(message), behavior: SnackBarBehavior.floating),
+      );
   }
 
   @override
@@ -338,7 +408,7 @@ class _RemoteScreenState extends ConsumerState<RemoteScreen> {
     final connection = ref.watch(activeConnectionProvider);
 
     return PopScope(
-      onPopInvokedWithResult: (_, _) => _stopAll(force: true),
+      onPopInvokedWithResult: (_, _) => _stopAll(),
       child: Scaffold(
         backgroundColor: Colors.black,
         body: dashAsync.when(
@@ -348,96 +418,154 @@ class _RemoteScreenState extends ConsumerState<RemoteScreen> {
             final motionRunning =
                 data.servicesStatus?['motion']?['status'] == 'running';
             final battery = data.robotInfo?.battery;
-            return Stack(
-              fit: StackFit.expand,
-              children: [
-                _VideoBackdrop(
-                  mode: _videoMode,
-                  left: _leftVideo,
-                  right: _rightVideo,
-                  connected: connection != null,
-                ),
-                _RemoteScrim(),
-                Positioned(
-                  left: 12,
-                  top: 8,
-                  right: 12,
-                  child: _TopHud(
-                    deviceName: connection?.name ?? '未连接',
-                    controlConnected: connection != null,
-                    motionRunning: motionRunning,
-                    battery: battery,
-                    speed: _speed,
-                    linearX: _linearX,
-                    linearY: _linearY,
-                    angularZ: _angularZ,
-                    detailsOpen: _detailsOpen,
-                    lastCommandAt: _lastCommandAt,
-                    onBack: () => context.pop(),
-                    onToggleDetails: () =>
-                        setState(() => _detailsOpen = !_detailsOpen),
-                    onEmergencyStop: motionRunning
-                        ? () => _emergencyStop(data)
-                        : null,
-                  ),
-                ),
-                Positioned(
-                  top: 66,
-                  left: 18,
-                  child: _VideoModeControl(
-                    mode: _videoMode,
-                    playing: _videoPlaying,
-                    busy: _videoBusy,
-                    onModeChanged: (mode) => setState(() => _videoMode = mode),
-                  ),
-                ),
-                Positioned(
-                  left: 28,
-                  bottom: 22,
-                  child: _TranslationJoystick(
-                    enabled: !_controlsLocked && motionRunning,
-                    onMove: _updateJoystick,
-                    onRelease: _releaseJoystick,
-                  ),
-                ),
-                Positioned(
-                  right: 28,
-                  bottom: 30,
-                  child: _RotationControls(
-                    enabled: !_controlsLocked && motionRunning,
-                    leftActive: _rotatingLeft,
-                    rightActive: _rotatingRight,
-                    onLeftChanged: (active) =>
-                        _setRotation(left: true, active: active),
-                    onRightChanged: (active) =>
-                        _setRotation(left: false, active: active),
-                  ),
-                ),
-                Positioned(
-                  left: 0,
-                  right: 0,
-                  bottom: 26,
-                  child: Center(
-                    child: _StopControl(onPressed: () => _stopAll(force: true)),
-                  ),
-                ),
-                Positioned(
-                  left: 0,
-                  right: 0,
-                  bottom: 106,
-                  child: Center(
-                    child: _SpeedSelector(value: _speed, onChanged: _setSpeed),
-                  ),
-                ),
-                if (!motionRunning)
-                  _MotionPreparation(
-                    data: data,
-                    onStartMotion: () => _startMotion(data),
-                  )
-                else if (_controlsLocked)
-                  _ControlLockOverlay(onUnlock: _unlock),
-                if (_showUnlockHint) const _UnlockHint(),
-              ],
+            final actionPending = data.pendingActions.any(
+              (action) => action.startsWith('motion-action:'),
+            );
+            return LayoutBuilder(
+              builder: (context, constraints) {
+                final compact =
+                    constraints.maxWidth < 720 || constraints.maxHeight < 420;
+                final controlEnabled = !_controlsLocked && motionRunning;
+                return Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    _VideoBackdrop(
+                      mode: _videoMode,
+                      left: _leftVideo,
+                      right: _rightVideo,
+                      connected: connection != null,
+                    ),
+                    _RemoteScrim(),
+                    Positioned.fill(
+                      child: GestureDetector(
+                        behavior: HitTestBehavior.translucent,
+                        onTap: _openPanel == null
+                            ? null
+                            : () => setState(() => _openPanel = null),
+                      ),
+                    ),
+                    Positioned(
+                      left: 12,
+                      top: 8,
+                      right: 12,
+                      child: _TopHud(
+                        deviceName: connection?.name ?? '未连接',
+                        controlConnected: connection != null,
+                        motionRunning: motionRunning,
+                        battery: battery,
+                        compact: compact,
+                        onBack: () => context.pop(),
+                        onEmergencyStop: motionRunning
+                            ? () => _emergencyStop(data)
+                            : null,
+                      ),
+                    ),
+                    if (_showVelocity)
+                      Positioned(
+                        top: compact ? 58 : 66,
+                        left: 0,
+                        right: 0,
+                        child: Center(
+                          child: _VelocityOverlay(
+                            linearX: _linearX,
+                            linearY: _linearY,
+                            angularZ: _angularZ,
+                            compact: compact,
+                          ),
+                        ),
+                      ),
+                    Positioned(
+                      left: compact ? 16 : 28,
+                      bottom: compact ? 16 : 22,
+                      child: _TranslationJoystick(
+                        enabled: controlEnabled,
+                        size: compact ? 144 : 172,
+                        onMove: _updateJoystick,
+                        onRelease: _releaseJoystick,
+                      ),
+                    ),
+                    Positioned(
+                      right: compact ? 16 : 28,
+                      bottom: compact ? 22 : 30,
+                      child: _RotationControls(
+                        enabled: controlEnabled,
+                        buttonSize: compact ? 84 : 104,
+                        gap: compact ? 8 : 14,
+                        leftActive: _rotatingLeft,
+                        rightActive: _rotatingRight,
+                        onLeftChanged: (active) =>
+                            _setRotation(left: true, active: active),
+                        onRightChanged: (active) =>
+                            _setRotation(left: false, active: active),
+                      ),
+                    ),
+                    if (!motionRunning)
+                      _MotionPreparation(
+                        data: data,
+                        onStartMotion: () => _startMotion(data),
+                      )
+                    else if (_controlsLocked)
+                      _ControlLockOverlay(onUnlock: _unlock),
+                    if (_openPanel != null)
+                      Positioned(
+                        left: compact ? 96 : 180,
+                        right: compact ? 96 : 180,
+                        bottom: compact ? 76 : 88,
+                        child: Center(
+                          child: ConstrainedBox(
+                            constraints: BoxConstraints(
+                              maxWidth: 480,
+                              maxHeight: compact ? 156 : 220,
+                            ),
+                            child: _openPanel == _RemotePanel.actions
+                                ? _MotionActionsPanel(
+                                    items: data.motionItems,
+                                    enabled: controlEnabled && !actionPending,
+                                    controlsLocked: _controlsLocked,
+                                    motionRunning: motionRunning,
+                                    pendingActions: data.pendingActions,
+                                    onActionPressed: (item) => _confirmMotion(
+                                      item,
+                                      motionRunning: motionRunning,
+                                    ),
+                                  )
+                                : _RemoteSettingsPanel(
+                                    speed: _speed,
+                                    videoMode: _videoMode,
+                                    videoBusy: _videoBusy,
+                                    showVelocity: _showVelocity,
+                                    onSpeedChanged: _setSpeed,
+                                    onVideoModeChanged: (mode) =>
+                                        setState(() => _videoMode = mode),
+                                    onShowVelocityChanged: (show) =>
+                                        setState(() => _showVelocity = show),
+                                  ),
+                          ),
+                        ),
+                      ),
+                    Positioned(
+                      left: 0,
+                      right: 0,
+                      bottom: compact ? 14 : 20,
+                      child: Center(
+                        child: _ControlDock(
+                          compact: compact,
+                          openPanel: _openPanel,
+                          actionCount: data.motionItems
+                              .where((item) => motionItemId(item).isNotEmpty)
+                              .length,
+                          onActionsPressed: () =>
+                              _togglePanel(_RemotePanel.actions),
+                          onStopPressed: _stopAll,
+                          onSettingsPressed: () =>
+                              _togglePanel(_RemotePanel.settings),
+                        ),
+                      ),
+                    ),
+                    if (_showUnlockHint) const _UnlockHint(),
+                  ],
+                );
+              },
             );
           },
         ),
@@ -446,9 +574,14 @@ class _RemoteScreenState extends ConsumerState<RemoteScreen> {
   }
 
   void _forceLockControls() {
-    if (_controlsLocked && !_hasVelocity) return;
-    _stopAll(force: true);
-    if (mounted) setState(() => _controlsLocked = true);
+    if (_controlsLocked && !_hasVelocity && _openPanel == null) return;
+    _stopAll();
+    if (mounted) {
+      setState(() {
+        _controlsLocked = true;
+        _openPanel = null;
+      });
+    }
   }
 }
 
@@ -556,14 +689,8 @@ class _TopHud extends StatelessWidget {
   final bool controlConnected;
   final bool motionRunning;
   final int? battery;
-  final _SpeedPreset speed;
-  final double linearX;
-  final double linearY;
-  final double angularZ;
-  final bool detailsOpen;
-  final DateTime? lastCommandAt;
+  final bool compact;
   final VoidCallback onBack;
-  final VoidCallback onToggleDetails;
   final Future<void> Function()? onEmergencyStop;
 
   const _TopHud({
@@ -571,120 +698,101 @@ class _TopHud extends StatelessWidget {
     required this.controlConnected,
     required this.motionRunning,
     required this.battery,
-    required this.speed,
-    required this.linearX,
-    required this.linearY,
-    required this.angularZ,
-    required this.detailsOpen,
-    required this.lastCommandAt,
+    required this.compact,
     required this.onBack,
-    required this.onToggleDetails,
     required this.onEmergencyStop,
   });
 
   @override
   Widget build(BuildContext context) {
     final batteryText = battery == null ? '--' : '$battery%';
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+    return Row(
       children: [
-        Row(
-          children: [
-            _GlassIconButton(icon: Icons.arrow_back, onPressed: onBack),
-            const SizedBox(width: 10),
-            Expanded(
-              child: GestureDetector(
-                onTap: onToggleDetails,
-                child: Wrap(
-                  spacing: 8,
-                  runSpacing: 6,
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  children: [
-                    _HudPill(label: deviceName, icon: Icons.memory_outlined),
-                    _HudPill(
-                      label: controlConnected ? 'WS ONLINE' : 'WS OFFLINE',
-                      icon: controlConnected ? Icons.wifi : Icons.wifi_off,
-                      color: controlConnected
-                          ? AppTheme.success
-                          : AppTheme.danger,
-                    ),
-                    _HudPill(
-                      label: motionRunning ? 'MOTION ON' : 'MOTION OFF',
-                      icon: Icons.radio_button_checked,
-                      color: motionRunning
-                          ? AppTheme.success
-                          : AppTheme.warning,
-                    ),
-                    _HudPill(
-                      label: batteryText,
-                      icon: Icons.battery_full_outlined,
-                      color: battery != null && battery! <= 20
-                          ? AppTheme.danger
-                          : AppTheme.success,
-                    ),
-                    _HudPill(label: speed.label, icon: Icons.speed_outlined),
-                    _HudPill(
-                      label:
-                          'X ${linearX.toStringAsFixed(2)}  Y ${linearY.toStringAsFixed(2)}  W ${angularZ.toStringAsFixed(2)}',
-                      icon: Icons.analytics_outlined,
-                    ),
-                  ],
-                ),
+        _GlassIconButton(icon: Icons.arrow_back, onPressed: onBack),
+        SizedBox(width: compact ? 6 : 10),
+        Expanded(
+          child: Wrap(
+            spacing: compact ? 5 : 8,
+            runSpacing: 5,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              _HudPill(
+                label: deviceName,
+                icon: Icons.memory_outlined,
+                compact: compact,
               ),
-            ),
-            const SizedBox(width: 10),
-            _EmergencyButton(onTrigger: onEmergencyStop),
-          ],
-        ),
-        if (detailsOpen) ...[
-          const SizedBox(height: 8),
-          _DetailsPanel(
-            linearX: linearX,
-            linearY: linearY,
-            angularZ: angularZ,
-            lastCommandAt: lastCommandAt,
+              _HudPill(
+                label: controlConnected ? 'WS ONLINE' : 'WS OFFLINE',
+                icon: controlConnected ? Icons.wifi : Icons.wifi_off,
+                color: controlConnected ? AppTheme.success : AppTheme.danger,
+                compact: compact,
+              ),
+              _HudPill(
+                label: motionRunning ? 'MOTION ON' : 'MOTION OFF',
+                icon: Icons.radio_button_checked,
+                color: motionRunning ? AppTheme.success : AppTheme.warning,
+                compact: compact,
+              ),
+              _HudPill(
+                label: batteryText,
+                icon: Icons.battery_full_outlined,
+                color: battery != null && battery! <= 20
+                    ? AppTheme.danger
+                    : AppTheme.success,
+                compact: compact,
+              ),
+            ],
           ),
-        ],
+        ),
+        SizedBox(width: compact ? 6 : 10),
+        _EmergencyButton(onTrigger: onEmergencyStop, compact: compact),
       ],
     );
   }
 }
 
-class _DetailsPanel extends StatelessWidget {
+class _VelocityOverlay extends StatelessWidget {
   final double linearX;
   final double linearY;
   final double angularZ;
-  final DateTime? lastCommandAt;
+  final bool compact;
 
-  const _DetailsPanel({
+  const _VelocityOverlay({
     required this.linearX,
     required this.linearY,
     required this.angularZ,
-    required this.lastCommandAt,
+    required this.compact,
   });
 
   @override
   Widget build(BuildContext context) {
-    final last = lastCommandAt == null
-        ? '未发送'
-        : '${lastCommandAt!.hour.toString().padLeft(2, '0')}:${lastCommandAt!.minute.toString().padLeft(2, '0')}:${lastCommandAt!.second.toString().padLeft(2, '0')}';
     return _GlassPanel(
+      key: const ValueKey('remote_velocity_overlay'),
+      padding: EdgeInsets.symmetric(
+        horizontal: compact ? 9 : 12,
+        vertical: compact ? 6 : 8,
+      ),
       child: DefaultTextStyle(
-        style: const TextStyle(
+        style: TextStyle(
           color: Colors.white,
-          fontSize: 12,
+          fontSize: compact ? 10 : 12,
           fontFamily: 'monospace',
+          fontWeight: FontWeight.w600,
         ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Text('实时信息'),
-            const SizedBox(height: 6),
-            Text('输出速度 X ${linearX.toStringAsFixed(3)} m/s'),
-            Text('输出速度 Y ${linearY.toStringAsFixed(3)} m/s'),
-            Text('角速度   W ${angularZ.toStringAsFixed(3)} rad/s'),
-            Text('最近指令 $last'),
+            Icon(
+              Icons.speed_rounded,
+              color: AppTheme.accentDark,
+              size: compact ? 14 : 16,
+            ),
+            const SizedBox(width: 6),
+            Text('X ${linearX.toStringAsFixed(2)} m/s'),
+            _VelocityDivider(compact: compact),
+            Text('Y ${linearY.toStringAsFixed(2)} m/s'),
+            _VelocityDivider(compact: compact),
+            Text('W ${angularZ.toStringAsFixed(2)} rad/s'),
           ],
         ),
       ),
@@ -692,41 +800,254 @@ class _DetailsPanel extends StatelessWidget {
   }
 }
 
-class _VideoModeControl extends StatelessWidget {
-  final _RemoteVideoMode mode;
-  final bool playing;
-  final bool busy;
-  final ValueChanged<_RemoteVideoMode> onModeChanged;
+class _VelocityDivider extends StatelessWidget {
+  final bool compact;
 
-  const _VideoModeControl({
-    required this.mode,
-    required this.playing,
-    required this.busy,
-    required this.onModeChanged,
+  const _VelocityDivider({required this.compact});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.symmetric(horizontal: compact ? 5 : 8),
+      child: Text(
+        '|',
+        style: TextStyle(color: Colors.white.withValues(alpha: 0.28)),
+      ),
+    );
+  }
+}
+
+class _RemoteSettingsPanel extends StatelessWidget {
+  final _SpeedPreset speed;
+  final _RemoteVideoMode videoMode;
+  final bool videoBusy;
+  final bool showVelocity;
+  final ValueChanged<_SpeedPreset> onSpeedChanged;
+  final ValueChanged<_RemoteVideoMode> onVideoModeChanged;
+  final ValueChanged<bool> onShowVelocityChanged;
+
+  const _RemoteSettingsPanel({
+    required this.speed,
+    required this.videoMode,
+    required this.videoBusy,
+    required this.showVelocity,
+    required this.onSpeedChanged,
+    required this.onVideoModeChanged,
+    required this.onShowVelocityChanged,
   });
 
   @override
   Widget build(BuildContext context) {
     return _GlassPanel(
-      padding: const EdgeInsets.all(4),
-      child: SegmentedButton<_RemoteVideoMode>(
-        style: ButtonStyle(
-          visualDensity: VisualDensity.compact,
-          foregroundColor: const WidgetStatePropertyAll(Colors.white),
-          backgroundColor: WidgetStateProperty.resolveWith((states) {
-            if (states.contains(WidgetState.selected)) {
-              return AppTheme.primaryColor.withValues(alpha: 0.55);
-            }
-            return Colors.transparent;
-          }),
+      key: const ValueKey('remote_settings_panel'),
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 10),
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _SettingsRow(
+              label: '速度档位',
+              child: _SpeedSelector(value: speed, onChanged: onSpeedChanged),
+            ),
+            const SizedBox(height: 8),
+            _SettingsRow(
+              label: videoBusy ? '视频连接中' : '视频画面',
+              child: _VideoModeControl(
+                mode: videoMode,
+                onModeChanged: onVideoModeChanged,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Material(
+              type: MaterialType.transparency,
+              child: SwitchListTile(
+                key: const ValueKey('remote_velocity_toggle'),
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+                visualDensity: VisualDensity.compact,
+                title: const Text(
+                  '显示实时速度',
+                  style: TextStyle(color: Colors.white, fontSize: 13),
+                ),
+                subtitle: const Text(
+                  '显示当前下发的 X / Y / W 指令',
+                  style: TextStyle(color: Colors.white60, fontSize: 11),
+                ),
+                value: showVelocity,
+                onChanged: onShowVelocityChanged,
+              ),
+            ),
+          ],
         ),
-        segments: const [
-          ButtonSegment(value: _RemoteVideoMode.both, label: Text('双路')),
-          ButtonSegment(value: _RemoteVideoMode.left, label: Text('左')),
-          ButtonSegment(value: _RemoteVideoMode.right, label: Text('右')),
-        ],
-        selected: {mode},
-        onSelectionChanged: (set) => onModeChanged(set.first),
+      ),
+    );
+  }
+}
+
+class _SettingsRow extends StatelessWidget {
+  final String label;
+  final Widget child;
+
+  const _SettingsRow({required this.label, required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          width: 72,
+          child: Padding(
+            padding: const EdgeInsets.only(top: 9),
+            child: Text(
+              label,
+              style: const TextStyle(color: Colors.white70, fontSize: 12),
+            ),
+          ),
+        ),
+        Expanded(child: child),
+      ],
+    );
+  }
+}
+
+class _VideoModeControl extends StatelessWidget {
+  final _RemoteVideoMode mode;
+  final ValueChanged<_RemoteVideoMode> onModeChanged;
+
+  const _VideoModeControl({required this.mode, required this.onModeChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    return SegmentedButton<_RemoteVideoMode>(
+      style: _segmentedStyle(),
+      segments: const [
+        ButtonSegment(value: _RemoteVideoMode.both, label: Text('双路')),
+        ButtonSegment(value: _RemoteVideoMode.left, label: Text('左')),
+        ButtonSegment(value: _RemoteVideoMode.right, label: Text('右')),
+      ],
+      selected: {mode},
+      onSelectionChanged: (set) => onModeChanged(set.first),
+    );
+  }
+}
+
+ButtonStyle _segmentedStyle() {
+  return ButtonStyle(
+    visualDensity: VisualDensity.compact,
+    foregroundColor: const WidgetStatePropertyAll(Colors.white),
+    backgroundColor: WidgetStateProperty.resolveWith((states) {
+      if (states.contains(WidgetState.selected)) {
+        return AppTheme.primaryColor.withValues(alpha: 0.55);
+      }
+      return Colors.transparent;
+    }),
+    side: WidgetStatePropertyAll(
+      BorderSide(color: Colors.white.withValues(alpha: 0.24)),
+    ),
+  );
+}
+
+class _MotionActionsPanel extends StatelessWidget {
+  final List<Map<String, dynamic>> items;
+  final bool enabled;
+  final bool controlsLocked;
+  final bool motionRunning;
+  final Set<String> pendingActions;
+  final ValueChanged<Map<String, dynamic>> onActionPressed;
+
+  const _MotionActionsPanel({
+    required this.items,
+    required this.enabled,
+    required this.controlsLocked,
+    required this.motionRunning,
+    required this.pendingActions,
+    required this.onActionPressed,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final actions = items
+        .where((item) => motionItemId(item).isNotEmpty)
+        .toList(growable: false);
+    final unavailableMessage = !motionRunning
+        ? 'motion 未运行，动作暂不可用'
+        : controlsLocked
+        ? '解锁控制后可执行动作'
+        : null;
+
+    return _GlassPanel(
+      key: const ValueKey('remote_actions_panel'),
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(
+                  Icons.directions_run_rounded,
+                  color: AppTheme.accentDark,
+                  size: 18,
+                ),
+                const SizedBox(width: 7),
+                const Text(
+                  '离散动作',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const Spacer(),
+                Text(
+                  '${actions.length} 项',
+                  style: const TextStyle(color: Colors.white54, fontSize: 12),
+                ),
+              ],
+            ),
+            if (unavailableMessage != null) ...[
+              const SizedBox(height: 5),
+              Text(
+                unavailableMessage,
+                style: const TextStyle(color: AppTheme.warning, fontSize: 11),
+              ),
+            ],
+            const SizedBox(height: 10),
+            if (actions.isEmpty)
+              const SizedBox(
+                width: double.infinity,
+                child: Text(
+                  '当前适配器暂无可用动作',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Colors.white60, fontSize: 12),
+                ),
+              )
+            else
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: actions.map((item) {
+                  final id = motionItemId(item);
+                  final pending = pendingActions.contains('motion-action:$id');
+                  return Tooltip(
+                    message: motionItemDescription(item) ?? id,
+                    child: OutlinedButton(
+                      onPressed: enabled ? () => onActionPressed(item) : null,
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.white,
+                        side: BorderSide(
+                          color: Colors.white.withValues(alpha: 0.3),
+                        ),
+                        visualDensity: VisualDensity.compact,
+                      ),
+                      child: Text(pending ? '执行中…' : motionItemLabel(item)),
+                    ),
+                  );
+                }).toList(),
+              ),
+          ],
+        ),
       ),
     );
   }
@@ -734,11 +1055,13 @@ class _VideoModeControl extends StatelessWidget {
 
 class _TranslationJoystick extends StatefulWidget {
   final bool enabled;
+  final double size;
   final void Function(double x, double y) onMove;
   final VoidCallback onRelease;
 
   const _TranslationJoystick({
     required this.enabled,
+    required this.size,
     required this.onMove,
     required this.onRelease,
   });
@@ -748,13 +1071,12 @@ class _TranslationJoystick extends StatefulWidget {
 }
 
 class _TranslationJoystickState extends State<_TranslationJoystick> {
-  static const _size = 172.0;
   Offset _stick = Offset.zero;
 
   void _update(Offset localPosition) {
     if (!widget.enabled) return;
-    final center = const Offset(_size / 2, _size / 2);
-    final radius = _size * 0.32;
+    final center = Offset(widget.size / 2, widget.size / 2);
+    final radius = widget.size * 0.32;
     var delta = localPosition - center;
     final distance = delta.distance;
     if (distance > radius) delta = delta / distance * radius;
@@ -780,7 +1102,7 @@ class _TranslationJoystickState extends State<_TranslationJoystick> {
         onPanEnd: (_) => _release(),
         onPanCancel: _release,
         child: CustomPaint(
-          size: const Size.square(_size),
+          size: Size.square(widget.size),
           painter: _JoystickPainter(stick: _stick),
         ),
       ),
@@ -827,6 +1149,8 @@ class _JoystickPainter extends CustomPainter {
 
 class _RotationControls extends StatelessWidget {
   final bool enabled;
+  final double buttonSize;
+  final double gap;
   final bool leftActive;
   final bool rightActive;
   final ValueChanged<bool> onLeftChanged;
@@ -834,6 +1158,8 @@ class _RotationControls extends StatelessWidget {
 
   const _RotationControls({
     required this.enabled,
+    required this.buttonSize,
+    required this.gap,
     required this.leftActive,
     required this.rightActive,
     required this.onLeftChanged,
@@ -851,14 +1177,16 @@ class _RotationControls extends StatelessWidget {
             label: '左转',
             active: leftActive,
             enabled: enabled,
+            size: buttonSize,
             onChanged: onLeftChanged,
           ),
-          const SizedBox(width: 14),
+          SizedBox(width: gap),
           _HoldButton(
             icon: Icons.rotate_right_rounded,
             label: '右转',
             active: rightActive,
             enabled: enabled,
+            size: buttonSize,
             onChanged: onRightChanged,
           ),
         ],
@@ -872,6 +1200,7 @@ class _HoldButton extends StatelessWidget {
   final String label;
   final bool active;
   final bool enabled;
+  final double size;
   final ValueChanged<bool> onChanged;
 
   const _HoldButton({
@@ -879,6 +1208,7 @@ class _HoldButton extends StatelessWidget {
     required this.label,
     required this.active,
     required this.enabled,
+    required this.size,
     required this.onChanged,
   });
 
@@ -890,8 +1220,8 @@ class _HoldButton extends StatelessWidget {
       onPointerCancel: enabled ? (_) => onChanged(false) : null,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 120),
-        width: 104,
-        height: 104,
+        width: size,
+        height: size,
         decoration: BoxDecoration(
           color: active
               ? AppTheme.primaryColor.withValues(alpha: 0.58)
@@ -901,12 +1231,12 @@ class _HoldButton extends StatelessWidget {
                 ? AppTheme.primaryColor
                 : Colors.white.withValues(alpha: 0.42),
           ),
-          borderRadius: BorderRadius.circular(52),
+          borderRadius: BorderRadius.circular(size / 2),
         ),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(icon, color: Colors.white, size: 36),
+            Icon(icon, color: Colors.white, size: size * 0.34),
             const SizedBox(height: 2),
             Text(label, style: const TextStyle(color: Colors.white)),
           ],
@@ -916,22 +1246,114 @@ class _HoldButton extends StatelessWidget {
   }
 }
 
-class _StopControl extends StatelessWidget {
+class _ControlDock extends StatelessWidget {
+  final bool compact;
+  final _RemotePanel? openPanel;
+  final int actionCount;
+  final VoidCallback onActionsPressed;
+  final VoidCallback onStopPressed;
+  final VoidCallback onSettingsPressed;
+
+  const _ControlDock({
+    required this.compact,
+    required this.openPanel,
+    required this.actionCount,
+    required this.onActionsPressed,
+    required this.onStopPressed,
+    required this.onSettingsPressed,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return _GlassPanel(
+      padding: EdgeInsets.all(compact ? 4 : 5),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _DockButton(
+            key: const ValueKey('remote_actions_button'),
+            icon: Icons.directions_run_rounded,
+            label: actionCount == 0 ? '动作' : '动作 $actionCount',
+            active: openPanel == _RemotePanel.actions,
+            compact: compact,
+            onPressed: onActionsPressed,
+          ),
+          SizedBox(width: compact ? 4 : 6),
+          _StopControl(compact: compact, onPressed: onStopPressed),
+          SizedBox(width: compact ? 4 : 6),
+          _DockButton(
+            key: const ValueKey('remote_settings_button'),
+            icon: Icons.tune_rounded,
+            label: '设置',
+            active: openPanel == _RemotePanel.settings,
+            compact: compact,
+            onPressed: onSettingsPressed,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _DockButton extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final bool active;
+  final bool compact;
   final VoidCallback onPressed;
 
-  const _StopControl({required this.onPressed});
+  const _DockButton({
+    super.key,
+    required this.icon,
+    required this.label,
+    required this.active,
+    required this.compact,
+    required this.onPressed,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return TextButton.icon(
+      style: TextButton.styleFrom(
+        foregroundColor: Colors.white,
+        backgroundColor: active
+            ? AppTheme.primaryColor.withValues(alpha: 0.42)
+            : Colors.transparent,
+        padding: EdgeInsets.symmetric(
+          horizontal: compact ? 9 : 12,
+          vertical: compact ? 9 : 11,
+        ),
+        visualDensity: VisualDensity.compact,
+      ),
+      onPressed: onPressed,
+      icon: Icon(icon, size: compact ? 17 : 19),
+      label: Text(label, style: TextStyle(fontSize: compact ? 11 : 12)),
+    );
+  }
+}
+
+class _StopControl extends StatelessWidget {
+  final bool compact;
+  final VoidCallback onPressed;
+
+  const _StopControl({required this.compact, required this.onPressed});
 
   @override
   Widget build(BuildContext context) {
     return FilledButton.icon(
+      key: const ValueKey('remote_stop_button'),
       style: FilledButton.styleFrom(
         backgroundColor: AppTheme.danger.withValues(alpha: 0.88),
         foregroundColor: Colors.white,
-        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+        padding: EdgeInsets.symmetric(
+          horizontal: compact ? 12 : 18,
+          vertical: compact ? 9 : 11,
+        ),
+        visualDensity: VisualDensity.compact,
       ),
       onPressed: onPressed,
-      icon: const Icon(Icons.stop_rounded),
-      label: const Text('停止'),
+      icon: Icon(Icons.stop_rounded, size: compact ? 18 : 20),
+      label: Text('停止', style: TextStyle(fontSize: compact ? 11 : 12)),
     );
   }
 }
@@ -944,27 +1366,15 @@ class _SpeedSelector extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return _GlassPanel(
-      padding: const EdgeInsets.all(4),
-      child: SegmentedButton<_SpeedPreset>(
-        style: ButtonStyle(
-          visualDensity: VisualDensity.compact,
-          foregroundColor: const WidgetStatePropertyAll(Colors.white),
-          backgroundColor: WidgetStateProperty.resolveWith((states) {
-            if (states.contains(WidgetState.selected)) {
-              return AppTheme.primaryColor.withValues(alpha: 0.55);
-            }
-            return Colors.transparent;
-          }),
-        ),
-        segments: const [
-          ButtonSegment(value: _SpeedPreset.slow, label: Text('慢速')),
-          ButtonSegment(value: _SpeedPreset.normal, label: Text('标准')),
-          ButtonSegment(value: _SpeedPreset.fast, label: Text('快速')),
-        ],
-        selected: {value},
-        onSelectionChanged: (set) => onChanged(set.first),
-      ),
+    return SegmentedButton<_SpeedPreset>(
+      style: _segmentedStyle(),
+      segments: const [
+        ButtonSegment(value: _SpeedPreset.slow, label: Text('慢速')),
+        ButtonSegment(value: _SpeedPreset.normal, label: Text('标准')),
+        ButtonSegment(value: _SpeedPreset.fast, label: Text('快速')),
+      ],
+      selected: {value},
+      onSelectionChanged: (set) => onChanged(set.first),
     );
   }
 }
@@ -1058,8 +1468,9 @@ class _MotionPreparation extends StatelessWidget {
 
 class _EmergencyButton extends StatelessWidget {
   final Future<void> Function()? onTrigger;
+  final bool compact;
 
-  const _EmergencyButton({required this.onTrigger});
+  const _EmergencyButton({required this.onTrigger, required this.compact});
 
   @override
   Widget build(BuildContext context) {
@@ -1068,18 +1479,31 @@ class _EmergencyButton extends StatelessWidget {
       child: Opacity(
         opacity: onTrigger == null ? 0.46 : 1,
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          padding: EdgeInsets.symmetric(
+            horizontal: compact ? 9 : 14,
+            vertical: compact ? 8 : 10,
+          ),
           decoration: BoxDecoration(
             color: AppTheme.danger.withValues(alpha: 0.84),
             borderRadius: BorderRadius.circular(999),
             border: Border.all(color: Colors.white.withValues(alpha: 0.28)),
           ),
-          child: const Row(
+          child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.warning_amber_rounded, color: Colors.white, size: 18),
-              SizedBox(width: 6),
-              Text('长按急停', style: TextStyle(color: Colors.white)),
+              Icon(
+                Icons.warning_amber_rounded,
+                color: Colors.white,
+                size: compact ? 16 : 18,
+              ),
+              SizedBox(width: compact ? 4 : 6),
+              Text(
+                compact ? '急停' : '长按急停',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: compact ? 11 : 14,
+                ),
+              ),
             ],
           ),
         ),
@@ -1096,7 +1520,7 @@ class _UnlockHint extends StatelessWidget {
     return Positioned(
       left: 0,
       right: 0,
-      top: 92,
+      top: 108,
       child: Center(
         child: _HudPill(
           label: '遥控已解锁，松手会自动停止',
@@ -1125,14 +1549,23 @@ class _HudPill extends StatelessWidget {
   final String label;
   final IconData icon;
   final Color? color;
+  final bool compact;
 
-  const _HudPill({required this.label, required this.icon, this.color});
+  const _HudPill({
+    required this.label,
+    required this.icon,
+    this.color,
+    this.compact = false,
+  });
 
   @override
   Widget build(BuildContext context) {
     final tint = color ?? Colors.white;
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      padding: EdgeInsets.symmetric(
+        horizontal: compact ? 7 : 10,
+        vertical: compact ? 5 : 7,
+      ),
       decoration: BoxDecoration(
         color: Colors.black.withValues(alpha: 0.42),
         borderRadius: BorderRadius.circular(999),
@@ -1141,13 +1574,13 @@ class _HudPill extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, color: tint, size: 16),
-          const SizedBox(width: 6),
+          Icon(icon, color: tint, size: compact ? 13 : 16),
+          SizedBox(width: compact ? 4 : 6),
           Text(
             label,
-            style: const TextStyle(
+            style: TextStyle(
               color: Colors.white,
-              fontSize: 12,
+              fontSize: compact ? 10 : 12,
               fontFamily: 'monospace',
             ),
           ),
@@ -1181,6 +1614,7 @@ class _GlassPanel extends StatelessWidget {
   final EdgeInsetsGeometry padding;
 
   const _GlassPanel({
+    super.key,
     required this.child,
     this.padding = const EdgeInsets.all(18),
   });

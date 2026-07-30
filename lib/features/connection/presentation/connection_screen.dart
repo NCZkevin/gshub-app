@@ -6,6 +6,8 @@ import 'package:go_router/go_router.dart';
 import '../../../app/theme.dart';
 import '../../../shared/widgets/console_widgets.dart';
 import 'connection_provider.dart';
+import 'machine_availability_provider.dart';
+import 'machine_availability_widgets.dart';
 import '../data/device_discovery_repository.dart';
 import '../domain/connection_model.dart';
 import '../../settings/data/settings_repository.dart';
@@ -21,6 +23,7 @@ class _ConnectionScreenState extends ConsumerState<ConnectionScreen> {
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(connectionProvider);
+    final availability = ref.watch(machineAvailabilityProvider);
 
     return ConsoleScaffold(
       appBar: AppBar(
@@ -89,6 +92,14 @@ class _ConnectionScreenState extends ConsumerState<ConnectionScreen> {
                       child: _MachineCard(
                         connection: conn,
                         isActive: isActive,
+                        availability: isActive ? availability : null,
+                        switching: state.switchingId == conn.id,
+                        connectEnabled:
+                            state.switchingId == null ||
+                            state.switchingId == conn.id,
+                        switchError: state.switchErrorId == conn.id
+                            ? state.switchError
+                            : null,
                         onConnect: () => ref
                             .read(connectionProvider.notifier)
                             .activate(conn.id),
@@ -145,6 +156,10 @@ class _MachineCard extends StatelessWidget {
   const _MachineCard({
     required this.connection,
     required this.isActive,
+    required this.availability,
+    required this.switching,
+    required this.connectEnabled,
+    required this.switchError,
     required this.onConnect,
     required this.onEdit,
     required this.onDelete,
@@ -152,6 +167,10 @@ class _MachineCard extends StatelessWidget {
 
   final RobotConnection connection;
   final bool isActive;
+  final MachineAvailabilityState? availability;
+  final bool switching;
+  final bool connectEnabled;
+  final String? switchError;
   final VoidCallback onConnect;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
@@ -191,22 +210,47 @@ class _MachineCard extends StatelessWidget {
                 ),
                 const SizedBox(width: 12),
                 Expanded(
-                  child: Text(
-                    connection.name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w800,
-                    ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        connection.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w800,
+                            ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        isActive ? '当前机器' : '已保存',
+                        maxLines: 1,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          fontSize: 11,
+                          color: isActive
+                              ? AppTheme.primaryColor
+                              : AppTheme.mutedText(context),
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
                 const SizedBox(width: 8),
-                if (isActive)
-                  const StatusPill(label: 'ACTIVE', color: AppTheme.success)
+                if (switching)
+                  const StatusPill(
+                    label: '检测中',
+                    color: AppTheme.warning,
+                    icon: Icons.sync_rounded,
+                  )
+                else if (isActive && availability != null)
+                  MachineAvailabilityPill(availability: availability!)
                 else
                   TextButton.icon(
-                    onPressed: onConnect,
+                    onPressed: connectEnabled ? onConnect : null,
                     style: TextButton.styleFrom(
                       minimumSize: const Size(0, 36),
                       padding: const EdgeInsets.symmetric(horizontal: 10),
@@ -214,7 +258,7 @@ class _MachineCard extends StatelessWidget {
                       visualDensity: VisualDensity.compact,
                     ),
                     icon: const Icon(Icons.link_rounded, size: 16),
-                    label: const Text('连接'),
+                    label: Text(switchError == null ? '连接' : '重试'),
                   ),
                 PopupMenuButton<_MachineAction>(
                   tooltip: '更多操作',
@@ -309,6 +353,42 @@ class _MachineCard extends StatelessWidget {
                 ],
               ),
             ),
+            if (switchError != null) ...[
+              const SizedBox(height: 10),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 8,
+                ),
+                decoration: BoxDecoration(
+                  color: AppTheme.danger.withValues(alpha: 0.08),
+                  border: Border.all(
+                    color: AppTheme.danger.withValues(alpha: 0.28),
+                  ),
+                  borderRadius: BorderRadius.circular(9),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Icon(
+                      Icons.error_outline_rounded,
+                      size: 16,
+                      color: AppTheme.danger,
+                    ),
+                    const SizedBox(width: 7),
+                    Expanded(
+                      child: Text(
+                        switchError!,
+                        style: Theme.of(
+                          context,
+                        ).textTheme.bodySmall?.copyWith(color: AppTheme.danger),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ],
         ),
       ),

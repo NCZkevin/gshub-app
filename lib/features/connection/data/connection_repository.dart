@@ -60,6 +60,10 @@ class ConnectionRepository {
     await _prefs.setString(_kActiveIdKey, id);
   }
 
+  Future<void> clearActive() async {
+    await _prefs.remove(_kActiveIdKey);
+  }
+
   Future<void> delete(String id) async {
     final all = loadAll()..removeWhere((c) => c.id == id);
     await _prefs.setString(

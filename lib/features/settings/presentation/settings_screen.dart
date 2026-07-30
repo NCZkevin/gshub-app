@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../app/theme.dart';
 import '../../../features/connection/domain/connection_model.dart';
+import '../../../features/connection/presentation/machine_availability_provider.dart';
+import '../../../features/connection/presentation/machine_availability_widgets.dart';
 import '../../../shared/widgets/console_widgets.dart';
 import 'settings_provider.dart';
 import '../../../features/connection/presentation/connection_provider.dart';
@@ -15,6 +17,7 @@ class SettingsScreen extends ConsumerWidget {
     final themeMode = ref.watch(themeModeProvider);
     final locale = ref.watch(localeProvider);
     final connectionState = ref.watch(connectionProvider);
+    final availability = ref.watch(machineAvailabilityProvider);
 
     return ConsoleScaffold(
       appBar: AppBar(
@@ -64,14 +67,12 @@ class SettingsScreen extends ConsumerWidget {
                           style: _monoSubtitleStyle(context),
                         )
                       : Text('请先连接机器', style: _subtitleStyle(context)),
-                  trailing: StatusPill(
-                    label: connectionState.active != null
-                        ? 'ACTIVE'
-                        : 'OFFLINE',
-                    color: connectionState.active != null
-                        ? AppTheme.success
-                        : AppTheme.slate500,
-                  ),
+                  trailing: connectionState.active != null
+                      ? MachineAvailabilityPill(availability: availability)
+                      : const StatusPill(
+                          label: '未选择',
+                          color: AppTheme.slate500,
+                        ),
                 ),
                 if (connectionState.connections.isNotEmpty) ...[
                   Divider(color: AppTheme.borderColor(context)),
@@ -115,17 +116,26 @@ class SettingsScreen extends ConsumerWidget {
                           fontFamily: 'monospace',
                         ),
                       ),
-                      trailing: isActive
+                      trailing: connectionState.switchingId == conn.id
                           ? const StatusPill(
-                              label: 'ACTIVE',
-                              color: AppTheme.success,
+                              label: '检测中',
+                              color: AppTheme.warning,
+                              icon: Icons.sync_rounded,
                             )
+                          : isActive
+                          ? MachineAvailabilityPill(availability: availability)
                           : TextButton(
-                              onPressed: () => ref
-                                  .read(connectionProvider.notifier)
-                                  .activate(conn.id),
-                              child: const Text(
-                                '连接',
+                              onPressed: connectionState.switchingId == null
+                                  ? () => _activateConnection(
+                                      context,
+                                      ref,
+                                      conn.id,
+                                    )
+                                  : null,
+                              child: Text(
+                                connectionState.switchErrorId == conn.id
+                                    ? '重试'
+                                    : '连接',
                                 style: TextStyle(fontSize: 12),
                               ),
                             ),
@@ -142,7 +152,8 @@ class SettingsScreen extends ConsumerWidget {
             title: '网络模式配置',
             icon: Icons.bluetooth_searching,
             child: _ProvisioningWindowTile(
-              enabled: connectionState.active != null,
+              enabled: connectionState.active != null && availability.isUsable,
+              hasConnection: connectionState.active != null,
             ),
           ),
           const SizedBox(height: 12),
@@ -264,11 +275,30 @@ class SettingsScreen extends ConsumerWidget {
 
   TextStyle? _monoSubtitleStyle(BuildContext context) =>
       _subtitleStyle(context)?.copyWith(fontFamily: 'monospace');
+
+  Future<void> _activateConnection(
+    BuildContext context,
+    WidgetRef ref,
+    String id,
+  ) async {
+    final switched = await ref.read(connectionProvider.notifier).activate(id);
+    if (!switched && context.mounted) {
+      final message =
+          ref.read(connectionProvider).switchError ?? '无法连接机器，请稍后重试';
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(message), behavior: SnackBarBehavior.floating),
+      );
+    }
+  }
 }
 
 class _ProvisioningWindowTile extends ConsumerStatefulWidget {
   final bool enabled;
-  const _ProvisioningWindowTile({required this.enabled});
+  final bool hasConnection;
+  const _ProvisioningWindowTile({
+    required this.enabled,
+    required this.hasConnection,
+  });
 
   @override
   ConsumerState<_ProvisioningWindowTile> createState() =>
@@ -310,7 +340,11 @@ class _ProvisioningWindowTileState
       leading: const Icon(Icons.wifi_tethering, size: 20),
       title: const Text('重新配置当前机器的 Wi-Fi'),
       subtitle: Text(
-        widget.enabled ? '打开 10 分钟蓝牙配网窗口' : '离线机器会在 2 分钟后自动进入配网模式',
+        widget.enabled
+            ? '打开 10 分钟蓝牙配网窗口'
+            : widget.hasConnection
+            ? '当前机器离线，恢复连接后可用'
+            : '请先选择机器',
       ),
       trailing: _loading
           ? const SizedBox(

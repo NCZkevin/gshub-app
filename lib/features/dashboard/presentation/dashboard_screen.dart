@@ -9,6 +9,7 @@ import '../../../features/connection/presentation/connection_provider.dart';
 import '../../../shared/domain/app_models.dart';
 import '../../../shared/widgets/console_widgets.dart';
 import '../../../shared/widgets/video_view_widget.dart';
+import '../domain/motion_item.dart';
 import 'dashboard_provider.dart';
 
 class DashboardScreen extends ConsumerStatefulWidget {
@@ -1082,29 +1083,39 @@ class _MotionActions extends ConsumerWidget {
 
   const _MotionActions({required this.data});
 
-  static const labels = {
-    'stand_up': '站起',
-    'sit_down': '趴下',
-    'stop': '停止',
-    'emergency_stop': '急停',
-  };
-
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final motionRunning =
         data.servicesStatus?['motion']?['status'] == 'running';
+    final actionPending = data.pendingActions.any(
+      (action) => action.startsWith('motion-action:'),
+    );
     return Wrap(
       spacing: 8,
       runSpacing: 8,
       children: data.motionItems.map((item) {
-        final id = item['id']?.toString() ?? '';
+        final id = motionItemId(item);
         if (id.isEmpty) return const SizedBox.shrink();
         final pending = data.pendingActions.contains('motion-action:$id');
         return OutlinedButton(
-          onPressed: !motionRunning || pending
+          onPressed: !motionRunning || actionPending
               ? null
-              : () => ref.read(dashboardProvider.notifier).triggerMotion(id),
-          child: Text(pending ? '...' : (labels[id] ?? id)),
+              : () async {
+                  final messenger = ScaffoldMessenger.of(context);
+                  try {
+                    await ref
+                        .read(dashboardProvider.notifier)
+                        .triggerMotion(id);
+                    messenger.showSnackBar(
+                      SnackBar(content: Text('${motionItemLabel(item)}执行成功')),
+                    );
+                  } catch (error) {
+                    messenger.showSnackBar(
+                      SnackBar(content: Text('动作执行失败：$error')),
+                    );
+                  }
+                },
+          child: Text(pending ? '...' : motionItemLabel(item)),
         );
       }).toList(),
     );

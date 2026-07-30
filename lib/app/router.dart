@@ -15,13 +15,14 @@ import 'adaptive_shell.dart';
 final rootNavigatorKey = GlobalKey<NavigatorState>();
 
 final routerProvider = Provider<GoRouter>((ref) {
-  final connectionState = ref.watch(connectionProvider);
+  final hasConnection = ref.watch(
+    connectionProvider.select((state) => state.activeId != null),
+  );
 
   return GoRouter(
     navigatorKey: rootNavigatorKey,
     initialLocation: '/dashboard',
     redirect: (context, state) {
-      final hasConnection = connectionState.activeId != null;
       final onConnection =
           state.matchedLocation == '/connection' ||
           state.matchedLocation == '/provision';

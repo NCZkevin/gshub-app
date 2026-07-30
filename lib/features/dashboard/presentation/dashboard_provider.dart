@@ -279,12 +279,10 @@ class DashboardNotifier extends AutoDisposeAsyncNotifier<DashboardState> {
 
   Future<void> triggerMotion(String id) async {
     final repo = await ref.read(dashboardRepositoryProvider.future);
-    if (repo == null) return;
+    if (repo == null) throw StateError('未连接设备');
     try {
       _setPending('motion-action:$id', true);
       await repo.triggerMotion(id);
-    } catch (e, st) {
-      state = AsyncValue.error(e, st);
     } finally {
       _setPending('motion-action:$id', false);
     }

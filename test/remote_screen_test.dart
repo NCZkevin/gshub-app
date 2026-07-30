@@ -33,6 +33,14 @@ class _FakeDashboardNotifier extends DashboardNotifier {
 }
 
 class _RunningDashboardNotifier extends DashboardNotifier {
+  static int triggerMotionCount = 0;
+  static String? lastMotionId;
+
+  static void reset() {
+    triggerMotionCount = 0;
+    lastMotionId = null;
+  }
+
   @override
   Future<DashboardState> build() async {
     return const DashboardState(
@@ -40,7 +48,18 @@ class _RunningDashboardNotifier extends DashboardNotifier {
       servicesStatus: {
         'motion': {'status': 'running'},
       },
+      motionItems: [
+        {'id': 'stand_up', 'display_name': '站起', 'description': '机器人恢复站立姿态'},
+        {'id': 'sit_down', 'display_name': '蹲下'},
+        {'id': 'wave'},
+      ],
     );
+  }
+
+  @override
+  Future<void> triggerMotion(String id) async {
+    triggerMotionCount++;
+    lastMotionId = id;
   }
 }
 
@@ -64,7 +83,10 @@ class _RecordingWsManager extends WsConnectionManager {
 }
 
 void main() {
-  setUp(_FakeDashboardNotifier.reset);
+  setUp(() {
+    _FakeDashboardNotifier.reset();
+    _RunningDashboardNotifier.reset();
+  });
 
   testWidgets('remote screen gates controls when motion is stopped', (
     tester,
@@ -152,6 +174,152 @@ void main() {
       isTrue,
       reason: ws.commands.toString(),
     );
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('velocity overlay is visible by default and can be hidden', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          activeConnectionProvider.overrideWithValue(null),
+          wsManagerProvider.overrideWithValue(_RecordingWsManager()),
+          dashboardProvider.overrideWith(_RunningDashboardNotifier.new),
+        ],
+        child: const MaterialApp(home: RemoteScreen()),
+      ),
+    );
+    await tester.pump();
+
+    expect(
+      find.byKey(const ValueKey('remote_velocity_overlay')),
+      findsOneWidget,
+    );
+    expect(find.byKey(const ValueKey('remote_settings_panel')), findsNothing);
+
+    await tester.tap(find.byKey(const ValueKey('remote_settings_button')));
+    await tester.pump();
+    expect(find.byKey(const ValueKey('remote_settings_panel')), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('remote_actions_button')));
+    await tester.pump();
+    expect(find.byKey(const ValueKey('remote_settings_panel')), findsNothing);
+    expect(find.byKey(const ValueKey('remote_actions_panel')), findsOneWidget);
+    expect(find.text('wave'), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('remote_settings_button')));
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('remote_velocity_toggle')));
+    await tester.pump();
+
+    expect(find.byKey(const ValueKey('remote_velocity_overlay')), findsNothing);
+    expect(find.byKey(const ValueKey('remote_settings_panel')), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('velocity overlay tracks commands and resets on release', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          activeConnectionProvider.overrideWithValue(null),
+          wsManagerProvider.overrideWithValue(_RecordingWsManager()),
+          dashboardProvider.overrideWith(_RunningDashboardNotifier.new),
+        ],
+        child: const MaterialApp(home: RemoteScreen()),
+      ),
+    );
+    await tester.pump();
+    await tester.tap(find.text('解锁控制'));
+    await tester.pump();
+
+    final joystick = find.byKey(const ValueKey('remote_translation_joystick'));
+    final gesture = await tester.startGesture(tester.getCenter(joystick));
+    await gesture.moveBy(const Offset(-54, 0));
+    await tester.pump();
+
+    expect(find.text('Y 0.59 m/s'), findsOneWidget);
+
+    await gesture.up();
+    await tester.pump();
+    expect(find.text('Y 0.00 m/s'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('motion actions require unlock and confirmation', (tester) async {
+    final ws = _RecordingWsManager();
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          activeConnectionProvider.overrideWithValue(null),
+          wsManagerProvider.overrideWithValue(ws),
+          dashboardProvider.overrideWith(_RunningDashboardNotifier.new),
+        ],
+        child: const MaterialApp(home: RemoteScreen()),
+      ),
+    );
+    await tester.pump();
+
+    await tester.tap(find.byKey(const ValueKey('remote_actions_button')));
+    await tester.pump();
+
+    expect(find.text('解锁控制后可执行动作'), findsOneWidget);
+    final lockedAction = tester.widget<OutlinedButton>(
+      find.widgetWithText(OutlinedButton, '站起'),
+    );
+    expect(lockedAction.onPressed, isNull);
+
+    await tester.tap(find.text('解锁控制'));
+    await tester.pump();
+    final unlockedAction = tester.widget<OutlinedButton>(
+      find.widgetWithText(OutlinedButton, '站起'),
+    );
+    expect(unlockedAction.onPressed, isNotNull);
+
+    final commandCount = ws.commands.length;
+    await tester.tap(find.widgetWithText(OutlinedButton, '站起'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('执行“站起”？'), findsOneWidget);
+    expect(find.text('机器人恢复站立姿态'), findsOneWidget);
+    expect(ws.commands.length, greaterThan(commandCount));
+    expect(ws.commands.last.linearX, 0);
+    expect(ws.commands.last.linearY, 0);
+    expect(ws.commands.last.angularZ, 0);
+
+    await tester.tap(find.text('确认执行'));
+    await tester.pumpAndSettle();
+
+    expect(_RunningDashboardNotifier.triggerMotionCount, 1);
+    expect(_RunningDashboardNotifier.lastMotionId, 'stand_up');
+    expect(find.text('站起 执行成功'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('compact landscape layout opens settings without overflow', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(640, 360));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          activeConnectionProvider.overrideWithValue(null),
+          wsManagerProvider.overrideWithValue(_RecordingWsManager()),
+          dashboardProvider.overrideWith(_RunningDashboardNotifier.new),
+        ],
+        child: const MaterialApp(home: RemoteScreen()),
+      ),
+    );
+    await tester.pump();
+
+    await tester.tap(find.byKey(const ValueKey('remote_settings_button')));
+    await tester.pump();
+
+    expect(find.byKey(const ValueKey('remote_settings_panel')), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 }

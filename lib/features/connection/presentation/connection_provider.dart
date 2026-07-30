@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -6,6 +8,7 @@ import '../../../core/websocket/ws_connection_manager.dart';
 import '../data/connection_repository.dart';
 import '../data/device_discovery_repository.dart';
 import '../data/ap_network_service.dart';
+import '../data/machine_connection_probe.dart';
 import '../domain/connection_model.dart';
 
 // ─── Infrastructure Providers ────────────────────────────────
@@ -64,8 +67,19 @@ final authPromptProvider = NotifierProvider<AuthPromptNotifier, String?>(
 class ConnectionState {
   final List<RobotConnection> connections;
   final String? activeId;
+  final String? switchingId;
+  final String? switchErrorId;
+  final String? switchError;
+  final MachineConnectionFailureKind? switchFailureKind;
 
-  const ConnectionState({required this.connections, required this.activeId});
+  const ConnectionState({
+    required this.connections,
+    required this.activeId,
+    this.switchingId,
+    this.switchErrorId,
+    this.switchError,
+    this.switchFailureKind,
+  });
 
   RobotConnection? get active =>
       connections.where((c) => c.id == activeId).firstOrNull;
@@ -73,13 +87,30 @@ class ConnectionState {
   ConnectionState copyWith({
     List<RobotConnection>? connections,
     String? activeId,
+    String? switchingId,
+    bool clearSwitching = false,
+    String? switchErrorId,
+    String? switchError,
+    MachineConnectionFailureKind? switchFailureKind,
+    bool clearSwitchError = false,
   }) => ConnectionState(
     connections: connections ?? this.connections,
     activeId: activeId ?? this.activeId,
+    switchingId: clearSwitching ? null : (switchingId ?? this.switchingId),
+    switchErrorId: clearSwitchError
+        ? null
+        : (switchErrorId ?? this.switchErrorId),
+    switchError: clearSwitchError ? null : (switchError ?? this.switchError),
+    switchFailureKind: clearSwitchError
+        ? null
+        : (switchFailureKind ?? this.switchFailureKind),
   );
 }
 
 class ConnectionNotifier extends Notifier<ConnectionState> {
+  int _switchGeneration = 0;
+  Future<void> _commitTail = Future<void>.value();
+
   @override
   ConnectionState build() {
     final repo = ref.watch(connectionRepositoryProvider);
@@ -106,7 +137,10 @@ class ConnectionNotifier extends Notifier<ConnectionState> {
     }
     state = state.copyWith(connections: repo.loadAll());
     // 自动选为活跃机器（如果是第一个）
-    if (state.activeId == null) await activate(id);
+    if (state.activeId == null) {
+      final switched = await activate(id);
+      if (!switched) throw StateError(state.switchError ?? '无法连接机器');
+    }
   }
 
   Future<void> addDiscovered(DiscoveredRobot robot) async {
@@ -130,11 +164,9 @@ class ConnectionNotifier extends Notifier<ConnectionState> {
     await repo.save(conn);
     if (!keepAPMetadata) await repo.deleteAPPassword(robot.sn);
     state = state.copyWith(connections: repo.loadAll());
-    if (state.activeId == null) await activate(robot.sn);
-    if (state.activeId == robot.sn) {
-      ref.invalidate(dioClientProvider);
-      ref.invalidate(dioClientFutureProvider);
-      ref.invalidate(wsManagerProvider);
+    if (state.activeId == null) {
+      final switched = await activate(robot.sn);
+      if (!switched) throw StateError(state.switchError ?? '无法连接机器');
     }
   }
 
@@ -153,8 +185,8 @@ class ConnectionNotifier extends Notifier<ConnectionState> {
     );
     await repo.deleteAPPassword(robot.sn);
     state = state.copyWith(connections: repo.loadAll());
-    await activate(robot.sn);
-    ref.invalidate(dioClientFutureProvider);
+    final switched = await activate(robot.sn);
+    if (!switched) throw StateError(state.switchError ?? '无法连接机器');
   }
 
   Future<void> addProvisionedAP({
@@ -177,17 +209,40 @@ class ConnectionNotifier extends Notifier<ConnectionState> {
     );
     await repo.saveAPPassword(robot.sn, password);
     state = state.copyWith(connections: repo.loadAll());
-    await activate(robot.sn);
-    ref.invalidate(dioClientFutureProvider);
+    final switched = await activate(robot.sn);
+    if (!switched) throw StateError(state.switchError ?? '无法连接机器');
   }
 
-  Future<void> activate(String id) async {
+  Future<bool> activate(String id) async {
+    final candidate = state.connections
+        .where((item) => item.id == id)
+        .firstOrNull;
+    if (candidate == null) return false;
+    if (state.activeId == id && state.switchingId == null) return true;
+
+    final previous = state.active;
+    final generation = ++_switchGeneration;
+    state = state.copyWith(switchingId: id, clearSwitchError: true);
     final repo = ref.read(connectionRepositoryProvider);
-    await repo.setActive(id);
-    state = state.copyWith(activeId: id);
-    // 重建依赖 active connection 的 provider
-    ref.invalidate(dioClientProvider);
-    ref.invalidate(wsManagerProvider);
+    try {
+      await _prepareNetwork(candidate, repo);
+      await ref.read(machineConnectionProbeProvider).probe(candidate);
+      if (generation != _switchGeneration) return false;
+
+      return _commitActive(id, generation, repo);
+    } catch (error) {
+      if (generation != _switchGeneration) return false;
+      final failure = normalizeMachineConnectionError(error);
+      await _restoreNetwork(previous, repo);
+      if (generation != _switchGeneration) return false;
+      state = state.copyWith(
+        clearSwitching: true,
+        switchErrorId: id,
+        switchError: failure.message,
+        switchFailureKind: failure.kind,
+      );
+      return false;
+    }
   }
 
   Future<void> update({
@@ -207,25 +262,97 @@ class ConnectionNotifier extends Notifier<ConnectionState> {
       networkKind: existing?.networkKind ?? ConnectionNetworkKind.lan,
       apSsid: existing?.apSsid,
     );
+    if (state.activeId == id && existing?.baseUrl != baseUrl) {
+      await ref.read(machineConnectionProbeProvider).probe(conn);
+    }
     await repo.save(conn);
     await repo.saveApiToken(id, apiToken);
     ref.read(authPromptProvider.notifier).reset(id);
     state = state.copyWith(connections: repo.loadAll());
-    // Re-init active connection if this is the active one
-    if (state.activeId == id) {
-      ref.invalidate(dioClientProvider);
-      ref.invalidate(dioClientFutureProvider);
-      ref.invalidate(wsManagerProvider);
-    }
   }
 
   Future<void> delete(String id) async {
+    if (state.switchingId == id) _switchGeneration++;
     final repo = ref.read(connectionRepositoryProvider);
     await repo.delete(id);
     state = ConnectionState(
       connections: repo.loadAll(),
       activeId: repo.getActiveId(),
     );
+  }
+
+  void clearSwitchError(String id) {
+    if (state.switchErrorId != id) return;
+    state = state.copyWith(clearSwitchError: true);
+  }
+
+  Future<void> _prepareNetwork(
+    RobotConnection connection,
+    ConnectionRepository repository,
+  ) async {
+    final service = ref.read(apNetworkServiceProvider);
+    if (connection.networkKind != ConnectionNetworkKind.ap) {
+      await service.release(forget: true);
+      return;
+    }
+    final ssid = connection.apSsid?.trim() ?? '';
+    if (ssid.isEmpty) {
+      throw const APNetworkException('AP_SSID_MISSING', '机器人热点名称缺失');
+    }
+    final password = await repository.getAPPassword(connection.id) ?? '';
+    if (password.isEmpty) {
+      throw const APNetworkException('AP_PASSWORD_MISSING', '机器人热点密码缺失');
+    }
+    await service.join(ssid: ssid, password: password);
+  }
+
+  Future<void> _restoreNetwork(
+    RobotConnection? previous,
+    ConnectionRepository repository,
+  ) async {
+    try {
+      if (previous == null ||
+          previous.networkKind != ConnectionNetworkKind.ap) {
+        await ref.read(apNetworkServiceProvider).release(forget: true);
+        return;
+      }
+      await _prepareNetwork(previous, repository);
+    } catch (_) {
+      // Keep the original switch failure. The availability monitor will
+      // report if restoring the previous machine also failed.
+    }
+  }
+
+  Future<bool> _commitActive(
+    String id,
+    int generation,
+    ConnectionRepository repository,
+  ) async {
+    final previousCommit = _commitTail;
+    final completed = Completer<void>();
+    _commitTail = completed.future;
+    await previousCommit;
+    try {
+      if (generation != _switchGeneration) return false;
+      final previousActiveId = state.activeId;
+      await repository.setActive(id);
+      if (generation != _switchGeneration) {
+        if (previousActiveId == null) {
+          await repository.clearActive();
+        } else {
+          await repository.setActive(previousActiveId);
+        }
+        return false;
+      }
+      state = state.copyWith(
+        activeId: id,
+        clearSwitching: true,
+        clearSwitchError: true,
+      );
+      return true;
+    } finally {
+      completed.complete();
+    }
   }
 }
 

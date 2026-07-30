@@ -68,6 +68,8 @@ class DioClient {
     );
     return response.data!;
   }
+
+  void close({bool force = true}) => _dio.close(force: force);
 }
 
 class _AuthInterceptor extends Interceptor {
