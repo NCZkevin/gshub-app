@@ -43,7 +43,7 @@ class _RemoteScreenState extends ConsumerState<RemoteScreen> {
 
   late final JanusVideoController _leftVideo;
   late final JanusVideoController _rightVideo;
-  late final WsConnectionManager _wsManager;
+  late WsConnectionManager _wsManager;
   Future<void>? _videoInitFuture;
   Timer? _controlTimer;
   Timer? _idleTimer;
@@ -406,6 +406,7 @@ class _RemoteScreenState extends ConsumerState<RemoteScreen> {
 
     final dashAsync = ref.watch(dashboardProvider);
     final connection = ref.watch(activeConnectionProvider);
+    _wsManager = ref.watch(wsManagerProvider);
 
     return PopScope(
       onPopInvokedWithResult: (_, _) => _stopAll(),

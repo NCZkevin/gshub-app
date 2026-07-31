@@ -7,6 +7,10 @@ import 'package:sysapp/features/dashboard/presentation/dashboard_provider.dart';
 import 'package:sysapp/features/remote/presentation/remote_screen.dart';
 import 'package:sysapp/shared/domain/app_models.dart';
 
+final _replaceableWsManagerProvider = StateProvider<WsConnectionManager>(
+  (ref) => throw UnimplementedError(),
+);
+
 class _FakeDashboardNotifier extends DashboardNotifier {
   static int startMotionCount = 0;
 
@@ -175,6 +179,65 @@ void main() {
       reason: ws.commands.toString(),
     );
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('remote controls use the latest websocket manager', (
+    tester,
+  ) async {
+    final initialWs = _RecordingWsManager();
+    final currentWs = _RecordingWsManager();
+    final container = ProviderContainer(
+      overrides: [
+        activeConnectionProvider.overrideWithValue(null),
+        _replaceableWsManagerProvider.overrideWith((ref) => initialWs),
+        wsManagerProvider.overrideWith(
+          (ref) => ref.watch(_replaceableWsManagerProvider),
+        ),
+        dashboardProvider.overrideWith(_RunningDashboardNotifier.new),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const MaterialApp(home: RemoteScreen()),
+      ),
+    );
+    await tester.pump();
+
+    container.read(_replaceableWsManagerProvider.notifier).state = currentWs;
+    container.read(wsManagerProvider);
+    await tester.pump();
+
+    await tester.tap(find.text('解锁控制'));
+    await tester.pump();
+    final joystick = find.byKey(const ValueKey('remote_translation_joystick'));
+    final gesture = await tester.startGesture(tester.getCenter(joystick));
+    await gesture.moveBy(const Offset(0, -54));
+    await tester.pump();
+
+    expect(
+      currentWs.commands.any((command) => command.linearX > 0),
+      isTrue,
+      reason: '全屏遥控器必须向 provider 当前持有的 WebSocket manager 发送指令',
+    );
+
+    await gesture.up();
+    currentWs.commands.clear();
+
+    final rotationGesture = await tester.startGesture(
+      tester.getCenter(find.text('左转')),
+    );
+    await tester.pump();
+
+    expect(
+      currentWs.commands.any((command) => command.angularZ > 0),
+      isTrue,
+      reason: '旋转控制也必须使用 provider 当前持有的 WebSocket manager',
+    );
+
+    await rotationGesture.up();
   });
 
   testWidgets('velocity overlay is visible by default and can be hidden', (
