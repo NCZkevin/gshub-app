@@ -46,7 +46,7 @@ class BleProvisioningRepository {
           (device) {
             devices[device.id] = ProvisioningDevice(
               id: device.id,
-              name: device.name.isEmpty ? 'GSHUB' : device.name,
+              name: device.name.isEmpty ? 'ORSUS Worker' : device.name,
               rssi: device.rssi,
             );
           },
@@ -245,17 +245,42 @@ class ProvisioningSession {
             if (!_events.isClosed) _events.addError(error, stackTrace);
           },
         );
+    deviceInfo = await _loadDeviceInfo();
+  }
+
+  Future<ProvisioningDeviceInfo> _loadDeviceInfo() async {
+    try {
+      final response = await _request(
+        type: 'device_info.get',
+        responseType: 'device_info.result',
+        alternateResponseTypes: const {'device_info.get.result'},
+        timeout: const Duration(seconds: 8),
+      );
+      return _decodeDeviceInfo(response);
+    } on ProvisioningException catch (error) {
+      if (error.code != 'INVALID_REQUEST') rethrow;
+      // Protocol v1 daemons released before device_info.get only expose the
+      // legacy read characteristic. Keep that path for compatible MTUs.
+      return _readLegacyDeviceInfo();
+    }
+  }
+
+  Future<ProvisioningDeviceInfo> _readLegacyDeviceInfo() async {
     final raw = await _ble.readCharacteristic(_deviceInfoCharacteristic);
     final payload = ProvisioningFrameReassembler().add(raw);
     if (payload == null) {
       throw const FormatException('设备信息帧不完整');
     }
     final envelope = decodeProvisioningEnvelope(payload);
+    return _decodeDeviceInfo(envelope);
+  }
+
+  ProvisioningDeviceInfo _decodeDeviceInfo(ProvisioningEnvelope envelope) {
     if (envelope.type != 'device_info.result' ||
         envelope.payload is! Map<String, dynamic>) {
       throw const FormatException('设备信息响应格式不正确');
     }
-    deviceInfo = ProvisioningDeviceInfo.fromJson(
+    return ProvisioningDeviceInfo.fromJson(
       envelope.payload! as Map<String, dynamic>,
     );
   }
@@ -351,6 +376,7 @@ class ProvisioningSession {
   Future<ProvisioningEnvelope> _request({
     required String type,
     String? responseType,
+    Set<String> alternateResponseTypes = const {},
     Object? payload,
     required Duration timeout,
   }) async {
@@ -362,11 +388,15 @@ class ProvisioningSession {
     }
     final requestId = _nextRequestId();
     _activeRequestId = requestId;
+    final expectedResponseTypes = {
+      responseType ?? '$type.result',
+      ...alternateResponseTypes,
+    };
     final response = events
         .firstWhere(
           (event) =>
               event.requestId == requestId &&
-              event.type == (responseType ?? '$type.result'),
+              expectedResponseTypes.contains(event.type),
         )
         .timeout(timeout);
     try {

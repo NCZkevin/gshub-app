@@ -1,6 +1,6 @@
 {
-    "name": "Orsus hub",
-    "short_name": "Orsus hub",
+    "name": "ORSUS APP",
+    "short_name": "ORSUS APP",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",

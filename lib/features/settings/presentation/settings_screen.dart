@@ -254,7 +254,7 @@ class SettingsScreen extends ConsumerWidget {
                   contentPadding: EdgeInsets.zero,
                   minLeadingWidth: 28,
                   leading: const Icon(Icons.android, size: 20),
-                  title: Text('SysApp', style: _titleStyle(context)),
+                  title: Text('ORSUS APP', style: _titleStyle(context)),
                   subtitle: Text('机器人控制系统', style: _subtitleStyle(context)),
                 ),
               ],

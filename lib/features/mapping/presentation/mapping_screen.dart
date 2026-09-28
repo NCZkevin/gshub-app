@@ -1066,7 +1066,7 @@ class _PgmEditorCardState extends State<_PgmEditorCard> {
 
   Uint8List _encodeP5() {
     final header = ascii.encode(
-      'P5\n# edited by gshub app\n${_image.width} ${_image.height}\n255\n',
+      'P5\n# edited by ORSUS APP\n${_image.width} ${_image.height}\n255\n',
     );
     return Uint8List.fromList([...header, ..._pixels]);
   }

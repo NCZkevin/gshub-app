@@ -1,4 +1,4 @@
-# GSHUB App
+# ORSUS APP
 
 Robot controller multi-platform app built with Flutter.
 

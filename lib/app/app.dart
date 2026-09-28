@@ -87,7 +87,7 @@ class _AppState extends ConsumerState<App> with WidgetsBindingObserver {
     );
 
     return MaterialApp.router(
-      title: 'SysApp',
+      title: 'ORSUS APP',
       scaffoldMessengerKey: rootScaffoldMessengerKey,
       theme: AppTheme.light(),
       darkTheme: AppTheme.dark(),
